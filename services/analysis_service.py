@@ -1,6 +1,5 @@
 """
-Simple Analysis Service
-Clean, minimal implementation using simple models only.
+Analysis Service
 """
 
 import asyncio
@@ -14,8 +13,8 @@ from services.core_analyzer import CallGraphAnalyzer, RepoAnalyzer
 logger = logging.getLogger(__name__)
 
 
-class SimpleAnalysisService:
-    """Simple analysis service. Engineering is simplicity."""
+class AnalysisService:
+    """Analysis service. Engineering is simplicity."""
     
     def __init__(self):
         self.repo_analyzer = RepoAnalyzer()
@@ -42,11 +41,12 @@ class SimpleAnalysisService:
             
             # Convert to simple models
             repo_data = result["repository"]
+            analysis_id = f"{repo_data['owner']}_{repo_data['name']}_{int(datetime.utcnow().timestamp())}"
             repository = Repository(
-                owner=repo_data["owner"],
-                name=repo_data["name"], 
                 url=repo_data["url"],
-                analyzed_at=datetime.utcnow()
+                name=f"{repo_data['owner']}/{repo_data['name']}",
+                clone_path=result.get("clone_path", ""),
+                analysis_id=analysis_id
             )
             
             # Convert functions
@@ -96,12 +96,13 @@ class SimpleAnalysisService:
         except Exception as e:
             logger.error(f"Analysis failed for {repo_url}: {e}")
             # Return error result
+            analysis_id = f"error_{int(datetime.utcnow().timestamp())}"
             return AnalysisResult(
                 repository=Repository(
-                    owner="unknown",
-                    name="error",
                     url=repo_url,
-                    analyzed_at=datetime.utcnow()
+                    name="error",
+                    clone_path="",
+                    analysis_id=analysis_id
                 ),
                 functions=[],
                 relationships=[],

@@ -1,6 +1,5 @@
 """
 GitProbe Core Analyzer
-Simplified, consolidated analyzer classes moved from root files.
 """
 
 import ast

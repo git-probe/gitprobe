@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 
 from models import Function, CallRelationship, Repository, AnalysisResult, NodeSelection, ExportData
-from services import SimpleAnalysisService, SimpleExportService
+from services import AnalysisService, ExportService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -19,8 +19,8 @@ _analysis_cache: dict[str, AnalysisResult] = {}
 _selections: dict[str, NodeSelection] = {}
 
 # Services
-analysis_service = SimpleAnalysisService()
-export_service = SimpleExportService()
+analysis_service = AnalysisService()
+export_service = ExportService()
 
 
 @router.post("/analyze", response_model=AnalysisResult)

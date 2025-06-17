@@ -1,17 +1,16 @@
 """
-Simple Export Service
-Basic export functionality using simple models only.
+Export Service
 """
 
 import json
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 
-from models import Function, CallRelationship, AnalysisResult, ExportData, NodeSelection
+from models import AnalysisResult, ExportData, NodeSelection
 
 
-class SimpleExportService:
-    """Simple export service. Engineering is simplicity."""
+class ExportService:
+    """Export service. Engineering is simplicity."""
     
     def __init__(self):
         pass

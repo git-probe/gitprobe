@@ -7,7 +7,13 @@ class Function(BaseModel):
     """A function found in the codebase"""
     name: str
     file_path: str
-    line_number: int
+    line_start: int
+    line_end: Optional[int] = None
+    parameters: Optional[List[str]] = None
+    docstring: Optional[str] = None
+    is_method: bool = False
+    class_name: Optional[str] = None
+    code_snippet: Optional[str] = None
     display_name: Optional[str] = None  # For custom naming in UI
     
     def get_display_name(self) -> str:
@@ -19,6 +25,8 @@ class CallRelationship(BaseModel):
     """A call relationship between two functions"""
     caller: str
     callee: str
+    call_line: Optional[int] = None
+    is_resolved: bool = False
 
 
 class Repository(BaseModel):
