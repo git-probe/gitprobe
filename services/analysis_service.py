@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class AnalysisService:
-    """Analysis service. Engineering is simplicity."""
+    """Analysis service"""
     
     def __init__(self):
         self.repo_analyzer = RepoAnalyzer()

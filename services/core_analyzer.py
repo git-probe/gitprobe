@@ -10,33 +10,11 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Dict, List, Set, Optional, Tuple
-from dataclasses import dataclass, asdict
+
+from models import Function, CallRelationship
 
 
-@dataclass
-class FunctionInfo:
-    """Information about a function."""
-    name: str
-    file_path: str
-    line_start: int
-    line_end: int
-    parameters: List[str]
-    docstring: Optional[str]
-    scope: str  # 'module' or 'class:ClassName'
-    calls: List[str]  # Functions this function calls
-    is_method: bool
-    class_name: Optional[str] = None
-    code_snippet: Optional[str] = None
-    complexity_score: Optional[int] = None
-
-
-@dataclass
-class CallRelationship:
-    """Represents a function call relationship."""
-    caller: str  # "file_path:function_name"
-    callee: str  # "file_path:function_name" or just "function_name" for unresolved
-    call_line: int
-    is_resolved: bool  # Whether we found the callee definition
+# Using Pydantic models from models/core.py instead of dataclasses
 
 
 class PythonASTAnalyzer(ast.NodeVisitor):
@@ -46,7 +24,7 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         self.file_path = file_path
         self.content = content
         self.lines = content.split("\n")
-        self.functions: List[FunctionInfo] = []
+        self.functions: List[Function] = []
         self.current_class = None
         self.call_relationships: List[CallRelationship] = []
 
@@ -67,7 +45,7 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         """Visit async function definition."""
         self.visit_FunctionDef(node)
 
-    def _extract_function_info(self, node) -> FunctionInfo:
+    def _extract_function_info(self, node) -> Function:
         """Extract information from a function definition node."""
         # Get parameters
         params = [arg.arg for arg in node.args.args]
@@ -97,19 +75,16 @@ class PythonASTAnalyzer(ast.NodeVisitor):
             class_name = self.current_class
             is_method = True
 
-        return FunctionInfo(
+        return Function(
             name=node.name,
             file_path=self.file_path,
             line_start=node.lineno,
             line_end=node.end_lineno or node.lineno,
             parameters=params,
             docstring=docstring,
-            scope=scope,
-            calls=[],
             is_method=is_method,
             class_name=class_name,
             code_snippet=code_snippet,
-            complexity_score=complexity_score,
         )
 
     def _extract_function_calls(self, func_node, func_name: str):
@@ -263,7 +238,7 @@ class CallGraphAnalyzer:
     def __init__(self, repo_analyzer: RepoAnalyzer):
         """Initialize with a configured RepoAnalyzer."""
         self.repo_analyzer = repo_analyzer
-        self.functions: Dict[str, FunctionInfo] = {}
+        self.functions: Dict[str, Function] = {}
         self.call_relationships: List[CallRelationship] = []
 
     def analyze_repository(self, github_url: str) -> Dict:
@@ -298,8 +273,8 @@ class CallGraphAnalyzer:
                     "languages_found": list(set(f.get("language") for f in code_files)),
                     "files_analyzed": len(code_files),
                 },
-                "functions": [asdict(func) for func in self.functions.values()],
-                "relationships": [asdict(rel) for rel in self.call_relationships],
+                "functions": [func.model_dump() for func in self.functions.values()],
+                "relationships": [rel.model_dump() for rel in self.call_relationships],
                 "visualization": viz_data,
             }
         finally:
