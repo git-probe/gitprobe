@@ -1,237 +1,357 @@
-# GitProbe 🔍
+# GitProbe - Repository Analysis & Interactive Call Graph Visualization
 
-**Interactive GitHub Repository Analysis Tool** - The backend engine powering [gitprobe.com](https://gitprobe.com)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green.svg)](https://fastapi.tiangolo.com/)
+[![Pydantic](https://img.shields.io/badge/Pydantic-2.0+-red.svg)](https://docs.pydantic.dev/)
 
-Transform any GitHub repository into interactive visualizations and LLM-optimized structured data. Perfect for understanding codebases through file trees, function call graphs, and AI-ready exports.
+GitProbe is a powerful repository analysis tool that generates interactive call graphs and provides deep insights into code architecture. Transform any GitHub repository URL into comprehensive visualizations and AI-optimized analysis data.
 
-## ✨ Features
+## 🌟 Features
 
-### 📁 **File Tree Analysis**
-- **Smart filtering** with include/exclude patterns
-- **File statistics** (size, tokens, complexity)
-- **Advanced filters** by file size and type
-- **Hierarchical structure** with metadata
+### 🔍 **Interactive Analysis**
+- **Real-time Progress Tracking**: Monitor analysis progress with live updates
+- **Advanced Filtering**: Include/exclude patterns, file types, size limits
+- **Session Management**: Persistent analysis sessions with state management
+- **Filter Preview**: See what files will be analyzed before running
 
-### 🕸️ **Call Graph Analysis**
-- **Interactive visualizations** with Cytoscape.js
-- **Function relationships** mapping
-- **Code snippet extraction** for each function
-- **Multiple export formats** (HTML, SVG, JSON)
+### 🎯 **Interactive Node Management**
+- **Node Renaming**: Custom display names for functions
+- **Node Selection**: Multi-select nodes for focused analysis
+- **Tagging System**: Organize functions with custom tags
+- **Notes & Annotations**: Add contextual notes to functions
+- **Detailed Inspection**: Deep-dive into function metrics and relationships
 
-### 🤖 **LLM-Optimized Exports**
-- **Structured JSON** perfect for AI analysis
-- **Architectural insights** (entry points, utility functions)
-- **Code complexity metrics**
-- **Refactoring suggestions**
+### 📊 **Rich Visualizations**
+- **Cytoscape.js Integration**: Interactive, zoomable call graphs
+- **D3.js Support**: Force-directed layouts and custom visualizations
+- **Multiple Layout Options**: Circle, force, hierarchical layouts
+- **SVG Export**: Vector graphics for presentations
+- **Real-time Updates**: Live graph manipulation and filtering
+
+### 🤖 **AI-Optimized Exports**
+- **LLM-Ready JSON**: Structured data optimized for AI analysis
+- **Architectural Insights**: Auto-generated code quality assessments
+- **Partial Exports**: Export selected subsets of the graph
+- **Code Snippets**: Include full function source code
+- **Relationship Mapping**: Detailed call relationship analysis
+
+### 🔧 **Developer-Friendly API**
+- **RESTful API**: Clean, documented endpoints
+- **Pydantic Models**: Type-safe data validation
+- **FastAPI Integration**: Auto-generated docs and validation
+- **CORS Support**: Ready for frontend integration
+- **Background Processing**: Non-blocking analysis
 
 ## 🚀 Quick Start
 
 ### Installation
+
 ```bash
-git clone https://github.com/yourusername/gitprobe.git
+# Clone the repository
+git clone https://github.com/your-org/gitprobe.git
 cd gitprobe
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### Basic Usage
-```bash
-# File tree analysis
-python main.py tree https://github.com/user/repo
-
-# Interactive call graph visualization  
-python main.py callgraph https://github.com/user/repo --viz callgraph.html
-
-# Export LLM-optimized data
-python main.py callgraph https://github.com/user/repo --llm-json analysis.json
-```
-
-## 📖 Documentation
-
-### File Tree Analysis
-
-Analyze repository structure with advanced filtering:
+### Running the API Server
 
 ```bash
-# Basic analysis
-python main.py tree https://github.com/fastapi/fastapi
+# Start the development server
+python server.py
 
-# Filter by file patterns
-python main.py tree https://github.com/fastapi/fastapi \
-  --include "*.py" "docs/" \
-  --exclude "*test*" "*__pycache__*"
-
-# Filter by file size (KB)
-python main.py tree https://github.com/fastapi/fastapi \
-  --min-size 1 --max-size 100
-
-# Export to JSON
-python main.py tree https://github.com/fastapi/fastapi \
-  --output fastapi-structure.json
+# Or with uvicorn directly
+uvicorn api.app:create_app --reload --host 0.0.0.0 --port 8000
 ```
 
-**Output includes:**
-- Hierarchical file tree structure
-- File metadata (size, extension, estimated tokens)
-- Directory statistics
-- Total repository metrics
+The API will be available at:
+- **API**: http://localhost:8000/api
+- **Documentation**: http://localhost:8000/docs
+- **Alternative Docs**: http://localhost:8000/redoc
 
-### Call Graph Analysis
-
-Analyze function relationships and generate interactive visualizations:
+### Quick Analysis
 
 ```bash
-# Interactive HTML visualization
-python main.py callgraph https://github.com/miguelgrinberg/microblog \
-  --viz callgraph.html
+# Using the CLI (legacy)
+python main.py callgraph https://github.com/user/repo
 
-# Export all formats
-python main.py callgraph https://github.com/miguelgrinberg/microblog \
-  --viz interactive.html \
-  --svg static.svg \
-  --llm-json llm-analysis.json
-
-# Python files only
-python main.py callgraph https://github.com/miguelgrinberg/microblog \
-  --include "*.py" \
-  --exclude "*test*" "*migration*"
+# Using the API
+curl -X POST "http://localhost:8000/api/analyze-repo" \
+  -H "Content-Type: application/json" \
+  -d '{"repo_url": "https://github.com/user/repo"}'
 ```
 
-**Interactive Features:**
-- **Click nodes** → View function details + code
-- **Multiple layouts** (circular, force-directed, hierarchical)
-- **Download buttons** for SVG and LLM JSON
-- **Zoom, pan, focus** on specific functions
+## 📚 API Usage
 
-### LLM-Optimized JSON Structure
+### 1. Start Analysis
 
-Perfect for AI code analysis:
+```python
+import requests
 
-```json
-{
-  "repository_info": {
-    "name": "owner/repo",
-    "total_functions": 109,
-    "total_files": 32,
-    "languages": ["python"]
-  },
-  "architecture_summary": {
-    "entry_points": [...],      // Functions not called by others
-    "utility_functions": [...], // Frequently reused functions
-    "complex_functions": [...], // Large functions (>20 lines)
-    "isolated_functions": [...] // Unused/dead code candidates
-  },
-  "functions": {
-    "file.py:function_name": {
-      "name": "function_name",
-      "file": "file.py", 
-      "parameters": [...],
-      "complexity": 15,
-      "times_called": 3,
-      "code_snippet": "def function_name():\n    ...",
-      "docstring": "Function description"
+# Start repository analysis
+response = requests.post("http://localhost:8000/api/analyze-repo", json={
+    "repo_url": "https://github.com/miguelgrinberg/microblog",
+    "filter_options": {
+        "include_patterns": ["*.py"],
+        "exclude_patterns": ["*test*", "migrations/"]
     }
-  },
-  "call_relationships": [
-    {
-      "from": "caller.py:function_a",
-      "to": "callee.py:function_b", 
-      "line": 42
-    }
-  ],
-  "insights": {
-    "most_called_functions": [...],
-    "largest_functions": [...],
-    "potential_refactoring_candidates": [...]
-  }
+})
+
+session = response.json()
+session_id = session["session_id"]
+```
+
+### 2. Monitor Progress
+
+```python
+# Check analysis progress
+progress = requests.get(f"http://localhost:8000/api/session/{session_id}")
+print(f"Progress: {progress.json()['progress']*100:.1f}%")
+```
+
+### 3. Interactive Node Management
+
+```python
+# Rename a function
+requests.put(f"http://localhost:8000/api/session/{session_id}/rename-node", 
+             params={"node_id": "app.py:create_app", "new_name": "Application Factory"})
+
+# Select multiple nodes
+requests.post(f"http://localhost:8000/api/session/{session_id}/select-nodes", 
+              json=["app.py:create_app", "app.py:register_blueprints"])
+
+# Get detailed node information
+details = requests.get(f"http://localhost:8000/api/session/{session_id}/node/app.py:create_app")
+print(details.json()["function_info"]["code_snippet"])
+```
+
+### 4. Export Analysis
+
+```python
+# Export LLM-optimized JSON
+export_request = {
+    "export_format": "json",
+    "optimize_for_llm": True,
+    "include_code_snippets": True,
+    "include_relationships": True
 }
+
+export_result = requests.post(
+    f"http://localhost:8000/api/session/{session_id}/export",
+    json=export_request
+)
+
+llm_data = export_result.json()["data"]
 ```
 
-## 🏗️ Project Structure
+## 🏗️ Architecture
+
+### Clean Architecture Design
 
 ```
 gitprobe/
-├── main.py                 # Main CLI entry point
-├── repo_analyzer.py        # File tree analysis
-├── call_graph_analyzer.py  # Call graph analysis  
-├── simple_analyzer.py      # Interactive CLI version
-├── requirements.txt        # Dependencies
-├── tests/                  # Test files
-│   ├── test_analyzer.py
-│   ├── test_advanced_analyzer.py
-│   └── test_call_graph.py
-└── examples/               # Example outputs
-    └── tiangolo-fastapi_structure.txt
+├── 📁 api/                  # FastAPI application & routes
+│   ├── app.py              # Application factory
+│   └── routes.py           # API endpoints
+├── 📁 models/              # Pydantic data models
+│   ├── function_models.py  # Function & relationship models
+│   ├── session_models.py   # Session & user interaction models
+│   ├── analysis_models.py  # Analysis result models
+│   └── export_models.py    # Export & node detail models
+├── 📁 services/            # Business logic layer
+│   ├── analysis_service.py # Call graph analysis engine
+│   ├── node_service.py     # Interactive node management
+│   ├── session_service.py  # Session state management
+│   └── export_service.py   # Data export functionality
+├── 📄 server.py            # Development server
+├── 📄 main.py              # CLI interface
+└── 📄 repo_analyzer.py     # Repository file analysis
+```
+
+### Key Design Principles
+
+- **🔷 Separation of Concerns**: Clear boundaries between API, business logic, and data models
+- **🔷 Type Safety**: Full Pydantic integration for runtime validation
+- **🔷 Dependency Injection**: Clean service composition and testing
+- **🔷 Open Source Ready**: Core analysis engine can be used independently
+- **🔷 API-First**: Designed for frontend integration (React, Vue, etc.)
+
+## 🎨 Frontend Integration
+
+### React Example
+
+```javascript
+// Start analysis
+const startAnalysis = async (repoUrl) => {
+  const response = await fetch('/api/analyze-repo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repo_url: repoUrl })
+  });
+  return response.json();
+};
+
+// Real-time progress updates
+const pollProgress = async (sessionId) => {
+  const response = await fetch(`/api/session/${sessionId}`);
+  const session = await response.json();
+  return session.progress;
+};
+
+// Interactive node selection
+const selectNodes = async (sessionId, nodeIds) => {
+  await fetch(`/api/session/${sessionId}/select-nodes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(nodeIds)
+  });
+};
+```
+
+### Cytoscape.js Integration
+
+```javascript
+// Load call graph visualization
+const loadCallGraph = async (sessionId) => {
+  const response = await fetch(`/api/session/${sessionId}`);
+  const session = await response.json();
+  const elements = session.analysis_results.visualization.cytoscape.elements;
+  
+  const cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: elements,
+    style: session.analysis_results.visualization.cytoscape.style,
+    layout: { name: 'cose' }
+  });
+  
+  // Interactive node clicking
+  cy.on('tap', 'node', async (evt) => {
+    const nodeId = evt.target.id();
+    const details = await fetch(`/api/session/${sessionId}/node/${nodeId}`);
+    showNodeDetails(await details.json());
+  });
+};
+```
+
+## 📊 Data Models
+
+### Function Information
+```python
+class FunctionInfo(BaseModel):
+    name: str                           # Function name
+    file_path: str                      # Source file path
+    function_id: str                    # Unique identifier
+    line_start: int                     # Starting line number
+    line_end: int                       # Ending line number
+    parameters: List[str]               # Parameter names
+    docstring: Optional[str]            # Function documentation
+    code_snippet: str                   # Full source code
+    function_type: FunctionType         # function, method, async_function, async_method
+    scope: FunctionScope                # module or class
+    class_name: Optional[str]           # Parent class if method
+    complexity_score: int               # Lines of code complexity
+    
+    # User modifications
+    custom_name: Optional[str]          # User-defined display name
+    tags: List[str]                     # User tags
+    notes: Optional[str]                # User notes
+```
+
+### Call Relationships
+```python
+class CallRelationship(BaseModel):
+    caller_id: str                      # Function making the call
+    callee_id: str                      # Function being called
+    call_line: int                      # Line number of call
+    is_resolved: bool                   # Whether callee was found
+    call_type: str                      # Type of call (direct, indirect)
+    context: Optional[str]              # Code context
+```
+
+## 🔧 Configuration
+
+### Filter Options
+```python
+class FilterOptions(BaseModel):
+    include_patterns: List[str] = []     # Files to include (*.py, src/)
+    exclude_patterns: List[str] = []     # Files to exclude (*test*, docs/)
+    file_extensions: List[str] = []      # Specific extensions
+    min_file_size_kb: Optional[float]    # Minimum file size
+    max_file_size_kb: Optional[float]    # Maximum file size
+    regex_mode: bool = False             # Enable regex patterns
+```
+
+### Export Configuration
+```python
+class ExportRequest(BaseModel):
+    export_format: str                   # json, svg, cytoscape
+    export_scope: str = "full"           # full, selection, filtered
+    optimize_for_llm: bool = False       # LLM-optimized output
+    include_code_snippets: bool = True   # Include source code
+    include_relationships: bool = True    # Include call relationships
+    max_nodes: Optional[int] = None      # Limit number of nodes
 ```
 
 ## 🧪 Testing
 
 ```bash
-# Run file tree tests
-python tests/test_analyzer.py
+# Run the test suite (when available)
+python -m pytest tests/
 
-# Run call graph tests  
-python tests/test_call_graph.py
+# Test the API endpoints
+python -m pytest tests/test_api.py
 
-# Interactive testing
-python tests/test_advanced_analyzer.py
+# Test the analysis engine
+python -m pytest tests/test_analysis.py
 ```
-
-## 🎯 Use Cases
-
-### For Developers
-- **Code exploration** of unfamiliar repositories
-- **Architecture understanding** through visual call graphs
-- **Refactoring planning** with complexity insights
-
-### For AI/LLMs
-- **Structured codebase understanding** vs. raw file dumps
-- **Architectural pattern recognition**
-- **Code quality analysis** and suggestions
-
-### For gitprobe.com
-- **Backend API** for repository analysis
-- **Interactive frontend** data source
-- **Export functionality** for users
-
-## 🔧 API Integration
-
-The analyzers can be used programmatically:
-
-```python
-from repo_analyzer import RepoAnalyzer
-from call_graph_analyzer import CallGraphAnalyzer
-
-# File tree analysis
-repo_analyzer = RepoAnalyzer(
-    include_patterns=['*.py'],
-    exclude_patterns=['*test*']
-)
-result = repo_analyzer.analyze_repository('https://github.com/user/repo')
-
-# Call graph analysis
-cg_analyzer = CallGraphAnalyzer(repo_analyzer)
-call_graph = cg_analyzer.analyze_repository('https://github.com/user/repo')
-```
-
-## 🚧 Roadmap
-
-- [ ] **Multi-language support** (JavaScript, TypeScript, Java, Go)
-- [ ] **Web API** for gitprobe.com integration
-- [ ] **Real-time analysis** for large repositories
-- [ ] **Advanced metrics** (cyclomatic complexity, maintainability index)
-- [ ] **Diff analysis** for pull requests
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Submit a pull request
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run pre-commit hooks
+pre-commit install
+
+# Start development server with auto-reload
+python server.py
+```
+
+### Code Style
+
+- **Type Hints**: All public functions must have type hints
+- **Pydantic Models**: Use Pydantic for all data structures
+- **Docstrings**: Google-style docstrings for all public methods
+- **Testing**: Write tests for new functionality
 
 ## 📄 License
 
-MIT License - see LICENSE file for details
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **FastAPI**: For the excellent web framework
+- **Pydantic**: For powerful data validation
+- **Cytoscape.js**: For interactive graph visualization
+- **AST**: Python's Abstract Syntax Tree for code analysis
+
+## 🚀 Roadmap
+
+- [ ] **Multi-language Support**: JavaScript, TypeScript, Java support
+- [ ] **Advanced Graph Analytics**: Strongly connected components, cycle detection
+- [ ] **AI Integration**: GPT-4 powered code analysis and suggestions
+- [ ] **Real-time Collaboration**: Multi-user analysis sessions
+- [ ] **Performance Optimization**: Caching and incremental analysis
+- [ ] **Plugin System**: Extensible analysis pipeline
 
 ---
 
-**Built for [gitprobe.com](https://gitprobe.com)** - The future of interactive code exploration 🚀 
+**GitProbe** - Transform your codebase understanding with interactive visualizations and AI-powered insights.
+
+🔗 **Links**: [Documentation](https://docs.gitprobe.com) | [API Reference](https://api.gitprobe.com) | [Examples](https://examples.gitprobe.com) 
