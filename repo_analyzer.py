@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 import git
 import pathspec
 import requests
+import functools
+import time
 
 
 class RepoAnalyzer:
@@ -120,46 +122,125 @@ class RepoAnalyzer:
 
     def _parse_github_url(self, url: str) -> Dict[str, str]:
         """
-        Parse GitHub URL to extract owner and repo name.
+        Validate and normalize a GitHub repository URL.
 
-        Args:
-            url: GitHub repository URL
+        Supported URL patterns:
+        - https://github.com/<owner>/<repo>[.git]
+        - git@github.com:<owner>/<repo>.git
+        - Branch/commit selectors via:
+          * https://github.com/<owner>/<repo>/tree/<branch>
+          * https://github.com/<owner>/<repo>/commit/<sha>
+          * https://github.com/<owner>/<repo>?ref=<branch>
+          * https://github.com/<owner>/<repo>#<branch>
 
         Returns:
-            Dictionary with 'owner' and 'repo' keys
-
-        Raises:
-            ValueError: If URL is not a valid GitHub repository URL
+            {
+                "owner": str,
+                "repo": str,
+                "ref": Optional[str],
+                "ref_type": Optional[str],
+                "clone_url": str,
+                "html_url": str,
+            }
         """
-        # Handle different GitHub URL formats
+        original = url.strip()
+
+        ref: Optional[str] = None
+        ref_type: Optional[str] = None
+
+        # Extract branch/commit via query string or fragment
+        if "?ref=" in original:
+            original, ref = original.split("?ref=", 1)
+            ref_type = "branch"
+        elif "#" in original:
+            original, ref = original.split("#", 1)
+            ref_type = "branch"
+
+        # /tree/<branch>
+        tree_match = re.search(r"/tree/([^/]+)", original)
+        if tree_match:
+            ref = tree_match.group(1)
+            ref_type = "branch"
+            original = original[: tree_match.start()]
+
+        # /commit/<sha>
+        commit_match = re.search(r"/commit/([0-9a-fA-F]{5,40})", original)
+        if commit_match:
+            ref = commit_match.group(1)
+            ref_type = "commit"
+            original = original[: commit_match.start()]
+
         patterns = [
-            r"https://github\.com/([^/]+)/([^/]+)/?",
-            r"git@github\.com:([^/]+)/([^/]+)\.git",
-            r"https://github\.com/([^/]+)/([^/]+)\.git",
+            r"^https://github\.com/([^/]+)/([^/]+?)(?:\.git)?/?$",
+            r"^git@github\.com:([^/]+)/([^/]+?)\.git$",
         ]
 
+        owner = repo = None
         for pattern in patterns:
-            match = re.match(pattern, url.strip())
-            if match:
-                owner, repo = match.groups()
-                # Remove .git suffix if present
-                if repo.endswith(".git"):
-                    repo = repo[:-4]
-                return {"owner": owner, "repo": repo}
+            m = re.match(pattern, original)
+            if m:
+                owner, repo = m.groups()
+                break
 
-        raise ValueError(f"Invalid GitHub URL format: {url}")
+        if not owner or not repo:
+            raise ValueError(f"Invalid GitHub URL format: {url}")
 
-    def _clone_repository(self, url: str, target_dir: str) -> None:
+        if repo.endswith(".git"):
+            repo = repo[:-4]
+
+        clone_url = f"https://github.com/{owner}/{repo}.git"
+        html_url = f"https://github.com/{owner}/{repo}"
+
+        return {
+            "owner": owner,
+            "repo": repo,
+            "ref": ref,
+            "ref_type": ref_type,
+            "clone_url": clone_url,
+            "html_url": html_url,
+        }
+
+    def _get_oauth_token(self) -> Optional[str]:
+        """Return GitHub OAuth token from the environment, if set."""
+        return os.getenv("GITHUB_TOKEN")
+
+    @functools.lru_cache(maxsize=256)
+    def _repository_exists(self, owner: str, repo: str) -> bool:
         """
-        Clone GitHub repository to target directory.
-
-        Args:
-            url: GitHub repository URL
-            target_dir: Directory to clone the repository to
+        Check if a repository exists (and is accessible with provided credentials).
+        This call is cached to avoid hitting GitHub rate limits repeatedly.
         """
+        api_url = f"https://api.github.com/repos/{owner}/{repo}"
+        headers: Dict[str, str] = {"Accept": "application/vnd.github.v3+json"}
+        token = self._get_oauth_token()
+        if token:
+            headers["Authorization"] = f"token {token}"
+
+        while True:
+            resp = requests.get(api_url, headers=headers)
+            # Handle basic rate limiting
+            if resp.status_code == 403 and resp.headers.get("X-RateLimit-Remaining") == "0":
+                reset = int(resp.headers.get("X-RateLimit-Reset", 0))
+                wait_seconds = max(0, reset - int(time.time()) + 1)
+                print(f"GitHub rate limit exceeded; sleeping for {wait_seconds}s…")
+                time.sleep(wait_seconds)
+                continue
+
+            return resp.status_code == 200
+
+    def _clone_repository(self, url: str, target_dir: str, ref: Optional[str] = None) -> None:
+        """Clone a GitHub repository, supporting private access and ref checkout."""
+        token = self._get_oauth_token()
+        auth_url = url
+        if token and url.startswith("https://github.com"):
+            # Inject token to enable private repo cloning
+            auth_url = url.replace("https://", f"https://{token}@")
+
         try:
-            print(f"Cloning repository: {url}")
-            git.Repo.clone_from(url, target_dir, depth=1)  # Shallow clone for speed
+            print(f"Cloning repository: {url}" + (f" (ref: {ref})" if ref else ""))
+            repo = git.Repo.clone_from(auth_url, target_dir, depth=1)
+            if ref:
+                repo.git.checkout(ref)
             print(f"Repository cloned to: {target_dir}")
         except git.exc.GitCommandError as e:
             raise RuntimeError(f"Failed to clone repository: {str(e)}")
@@ -336,15 +417,22 @@ class RepoAnalyzer:
         Returns:
             Dictionary containing repository metadata and file tree
         """
-        # Parse GitHub URL
+        # Parse, validate, and normalize the URL
         repo_info = self._parse_github_url(github_url)
+
+        # Verify repository existence/access
+        if not self._repository_exists(repo_info["owner"], repo_info["repo"]):
+            raise ValueError(
+                f"Repository {repo_info['owner']}/{repo_info['repo']} does not exist "
+                "or you do not have access."
+            )
 
         # Create temporary directory for cloning
         temp_dir = tempfile.mkdtemp(prefix="gitprobe_")
 
         try:
-            # Clone repository
-            self._clone_repository(github_url, temp_dir)
+            # Clone repository (with optional branch/commit)
+            self._clone_repository(repo_info["clone_url"], temp_dir, ref=repo_info.get("ref"))
 
             # Extract file tree
             file_tree = self._extract_file_tree(temp_dir)
@@ -354,7 +442,9 @@ class RepoAnalyzer:
                 "repository": {
                     "owner": repo_info["owner"],
                     "name": repo_info["repo"],
-                    "url": github_url,
+                    "url": repo_info["html_url"],
+                    "ref": repo_info.get("ref"),
+                    "ref_type": repo_info.get("ref_type"),
                 },
                 "analysis": {
                     "exclude_patterns": self.exclude_patterns,
