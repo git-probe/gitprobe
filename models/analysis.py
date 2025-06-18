@@ -1,6 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-from datetime import datetime
+from typing import List, Dict, Any
 from .core import Function, CallRelationship, Repository
 
 

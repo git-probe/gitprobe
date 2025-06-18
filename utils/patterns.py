@@ -199,3 +199,14 @@ DEFAULT_INCLUDE_PATTERNS = [
     "*.cfg",
     "*.ini",
 ]
+
+CODE_EXTENSIONS = {
+        ".py": "python",
+        ".js": "javascript",
+        ".ts": "typescript",
+        ".java": "java",
+        ".cpp": "cpp",
+        ".c": "c",
+        ".rs": "rust",
+        ".go": "go"
+}   

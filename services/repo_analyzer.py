@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Dict, List, Optional, Union
 from utils.patterns import DEFAULT_IGNORE_PATTERNS, DEFAULT_INCLUDE_PATTERNS
 
-
 class RepoAnalyzer:
     """
     A comprehensive repository analyzer that generates structured file trees.
