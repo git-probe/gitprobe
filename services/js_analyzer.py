@@ -36,7 +36,13 @@ class JavaScriptASTAnalyzer:
     tests until a more sophisticated parser is introduced.
     """
 
-    
+    # JavaScript keywords that should NOT be treated as functions
+    JS_KEYWORDS = {
+        'if', 'else', 'for', 'while', 'do', 'switch', 'try', 'catch', 'finally',
+        'return', 'break', 'continue', 'throw', 'new', 'delete', 'typeof', 'instanceof',
+        'void', 'null', 'undefined', 'true', 'false', 'var', 'let', 'const',
+        'function', 'class', 'extends', 'import', 'export', 'default', 'async', 'await'
+    }
     
     FUNCTION_DECL_RE = re.compile(r"^\s*function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
     ARROW_FUNCTION_RE = re.compile(
@@ -87,6 +93,9 @@ class JavaScriptASTAnalyzer:
                     match = self.METHOD_DEF_RE.match(line_stripped)
                     if match:
                         name = match.group(1)
+                        # Skip JavaScript keywords
+                        if name in self.JS_KEYWORDS:
+                            continue
                     else:
                         continue
 

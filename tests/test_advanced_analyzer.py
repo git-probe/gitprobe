@@ -105,7 +105,7 @@ def test_file_size_filter():
     if stats["largest_files"]:
         print(f"\nFiles found (by size):")
         for i, file_info in enumerate(stats["largest_files"], 1):
-            print(f"  {i}. {file_info['name']} ({file_info['size_kb']:.1f} KB)")
+            print(f"  {i}. {file_info['name']}")
 
 
 def test_combined_filters():

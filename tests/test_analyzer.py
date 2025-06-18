@@ -114,9 +114,8 @@ def test_file_tree_structure():
 
             indent = "  " * level
             if tree["type"] == "file":
-                size_kb = tree.get("size", 0) / 1024
                 binary_indicator = " [BINARY]" if tree.get("is_binary", False) else ""
-                print(f"{indent}📄 {tree['name']} ({size_kb:.1f} KB){binary_indicator}")
+                print(f"{indent}📄 {tree['name']}{binary_indicator}")
             else:
                 child_count = len(tree.get("children", []))
                 print(f"{indent}📁 {tree['name']}/ ({child_count} items)")

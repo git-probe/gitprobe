@@ -48,9 +48,9 @@ class RepoAnalyzer:
 
         # Combine default ignore patterns with user-specified exclude patterns
         self.exclude_patterns = (
-            (DEFAULT_IGNORE_PATTERNS + exclude_patterns)
+            list(DEFAULT_IGNORE_PATTERNS) + exclude_patterns
             if exclude_patterns is not None
-            else DEFAULT_IGNORE_PATTERNS
+            else list(DEFAULT_IGNORE_PATTERNS)
         )
 
     def analyze_repository_structure(self, repo_dir: str) -> Dict:
@@ -133,8 +133,7 @@ class RepoAnalyzer:
                     "name": path.name,
                     "path": relative_path_str,
                     "extension": path.suffix,
-                    "size_kb": round(size / 1024, 2),
-                    "estimated_tokens": size // 4,  # Rough estimate: 4 bytes per token
+                    "_size_bytes": size,  # Internal use only for summary calculations
                 }
             else:
                 # For directories, recursively process children
@@ -245,6 +244,6 @@ class RepoAnalyzer:
             Total size in kilobytes of all files in the tree.
         """
         if tree["type"] == "file":
-            return tree.get("size_kb", 0)
+            return tree.get("_size_bytes", 0) / 1024
         # Recursively sum sizes of all files in children directories
         return sum(self._calculate_size(child) for child in tree.get("children", []))

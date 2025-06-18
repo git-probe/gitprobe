@@ -96,8 +96,6 @@ class CallGraphAnalyzer:
                                 "name": tree["name"],
                                 "extension": ext,
                                 "language": CODE_EXTENSIONS[ext],
-                                "size_kb": tree.get("size_kb", 0),
-                                "estimated_tokens": tree.get("estimated_tokens", 0),
                             }
                         )
             elif tree["type"] == "directory" and tree.get("children"):
