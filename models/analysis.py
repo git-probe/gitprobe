@@ -11,6 +11,7 @@ class AnalysisResult(BaseModel):
     relationships: List[CallRelationship]
     file_tree: Dict[str, Any]
     summary: Dict[str, Any]
+    visualization: Dict[str, Any] = {}
 
 
 class NodeSelection(BaseModel):

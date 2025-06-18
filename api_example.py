@@ -60,17 +60,7 @@ async def analyze_repo(request: AnalyzeRequest):
         )
 
         # Convert AnalysisResult to dict for API response
-        response_data = {
-            "repository": analysis_result.repository.model_dump(),
-            "file_tree": analysis_result.file_tree,
-            "file_summary": {k: v for k, v in analysis_result.summary.items() if k != "analysis_type"},
-            "call_graph": {k: v for k, v in analysis_result.summary.items() if k in ["total_functions", "total_calls", "languages_found", "files_analyzed"]},
-            "functions": [func.model_dump() for func in analysis_result.functions],
-            "relationships": [rel.model_dump() for rel in analysis_result.relationships],
-            "summary": analysis_result.summary
-        }
-
-        return AnalysisResponse(status="success", data=response_data)
+        return AnalysisResponse(status="success", data=analysis_result.model_dump())
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")

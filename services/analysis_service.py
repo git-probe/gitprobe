@@ -9,9 +9,9 @@ AST parsing for call graph generation.
 import logging
 from typing import Dict, List, Optional, Any
     
-from repo_analyzer import RepoAnalyzer
-from call_graph_analyzer import CallGraphAnalyzer
-from cloning import clone_repository, cleanup_repository, parse_github_url
+from .repo_analyzer import RepoAnalyzer
+from .call_graph_analyzer import CallGraphAnalyzer
+from .cloning import clone_repository, cleanup_repository, parse_github_url
 from models.analysis import AnalysisResult
 from models.core import Repository
 
@@ -90,7 +90,8 @@ class AnalysisService:
                     **call_graph_result["call_graph"],
                     "analysis_type": "full",
                     "languages_analyzed": call_graph_result["call_graph"]["languages_found"]
-                }
+                },
+                visualization=call_graph_result["visualization"]
             )
             
             # Step 5: Cleanup
