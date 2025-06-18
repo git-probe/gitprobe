@@ -206,7 +206,7 @@ class AnalysisService:
         
         TODO: Expand this as we add JS/TS analyzer support.
         """
-        supported_languages = {"python"}  # Will add "javascript", "typescript"
+        supported_languages = {"python", "javascript", "typescript"}
         
         return [
             file_info for file_info in code_files 
@@ -215,7 +215,7 @@ class AnalysisService:
     
     def _get_supported_languages(self) -> List[str]:
         """Get list of currently supported languages for analysis."""
-        return ["python"]  # Will expand to ["python", "javascript", "typescript"]
+        return ["python", "javascript", "typescript"]
     
     def _cleanup_repository(self, temp_dir: str):
         """Clean up temporary repository directory."""
