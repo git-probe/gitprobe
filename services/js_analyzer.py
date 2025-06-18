@@ -107,16 +107,30 @@ class JavaScriptASTAnalyzer:
                 else []
             )
 
+            # -------- Determine end of function for code snippet ----------
+            end_line_idx = idx - 1  # zero-based index into lines list
+            brace_depth = line_stripped.count("{") - line_stripped.count("}")
+
+            if brace_depth > 0:
+                for j in range(end_line_idx + 1, len(lines)):
+                    brace_depth += lines[j].count("{") - lines[j].count("}")
+                    if brace_depth <= 0:
+                        end_line_idx = j
+                        break
+            # If we never opened a brace (e.g., concise arrow fn) we keep single line
+
+            code_snippet = "\n".join(lines[idx - 1 : end_line_idx + 1])
+
             func = Function(
                 name=name,
                 file_path=self.file_path,
                 line_start=idx,
-                line_end=idx,  # Heuristic; accurate end line requires full parser
+                line_end=end_line_idx + 1,
                 parameters=params,
                 docstring=None,
                 is_method=False,
                 class_name=None,
-                code_snippet=line_stripped,
+                code_snippet=code_snippet,
             )
             self.functions.append(func)
 
