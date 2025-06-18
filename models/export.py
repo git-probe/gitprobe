@@ -6,7 +6,8 @@ from .analysis import AnalysisResult, NodeSelection
 
 class ExportData(BaseModel):
     """Data prepared for export"""
+
     analysis: AnalysisResult
     selection: Optional[NodeSelection] = None
     export_type: str = "json"
-    generated_at: datetime 
+    generated_at: datetime

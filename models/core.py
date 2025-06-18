@@ -5,6 +5,7 @@ from datetime import datetime
 
 class Function(BaseModel):
     """A function found in the codebase"""
+
     name: str
     file_path: str
     line_start: int
@@ -15,7 +16,7 @@ class Function(BaseModel):
     class_name: Optional[str] = None
     code_snippet: Optional[str] = None
     display_name: Optional[str] = None  # For custom naming in UI
-    
+
     def get_display_name(self) -> str:
         """Get the name to display (custom or original)"""
         return self.display_name or self.name
@@ -23,6 +24,7 @@ class Function(BaseModel):
 
 class CallRelationship(BaseModel):
     """A call relationship between two functions"""
+
     caller: str
     callee: str
     call_line: Optional[int] = None
@@ -31,7 +33,8 @@ class CallRelationship(BaseModel):
 
 class Repository(BaseModel):
     """Basic repository information"""
+
     url: str
     name: str
     clone_path: str
-    analysis_id: str 
+    analysis_id: str
