@@ -9,6 +9,7 @@ import re
 from typing import List
 from models.core import Function, CallRelationship
 
+
 class JavaScriptASTAnalyzer:
     """
     AST analyzer for JavaScript files.
@@ -38,19 +39,50 @@ class JavaScriptASTAnalyzer:
 
     # JavaScript keywords that should NOT be treated as functions
     JS_KEYWORDS = {
-        'if', 'else', 'for', 'while', 'do', 'switch', 'try', 'catch', 'finally',
-        'return', 'break', 'continue', 'throw', 'new', 'delete', 'typeof', 'instanceof',
-        'void', 'null', 'undefined', 'true', 'false', 'var', 'let', 'const',
-        'function', 'class', 'extends', 'import', 'export', 'default', 'async', 'await'
+        "if",
+        "else",
+        "for",
+        "while",
+        "do",
+        "switch",
+        "try",
+        "catch",
+        "finally",
+        "return",
+        "break",
+        "continue",
+        "throw",
+        "new",
+        "delete",
+        "typeof",
+        "instanceof",
+        "void",
+        "null",
+        "undefined",
+        "true",
+        "false",
+        "var",
+        "let",
+        "const",
+        "function",
+        "class",
+        "extends",
+        "import",
+        "export",
+        "default",
+        "async",
+        "await",
     }
-    
+
     FUNCTION_DECL_RE = re.compile(r"^\s*function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
     ARROW_FUNCTION_RE = re.compile(
         r"^\s*(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>"
     )
     # Method definition – best-effort: `<name>(...) {` that is not a control keyword
-    METHOD_DEF_RE = re.compile(r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*{", re.ASCII)
-    
+    METHOD_DEF_RE = re.compile(
+        r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*{", re.ASCII
+    )
+
     CALL_RE = re.compile(r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
 
     def __init__(self, file_path: str, content: str):
@@ -58,7 +90,7 @@ class JavaScriptASTAnalyzer:
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
-    
+
     def analyze(self):
         """Parse the JavaScript file and populate ``self.functions`` and
         ``self.call_relationships`` using regex-based heuristics.
@@ -156,11 +188,30 @@ class JavaScriptASTAnalyzer:
             )
             boundaries.append((func, start_line, end_line))
 
+        # Add similar filtering:
+        JS_BUILTINS = {
+            "console",
+            "setTimeout",
+            "setInterval",
+            "parseInt",
+            "parseFloat",
+            "JSON",
+            "Math",
+            "Date",
+            "Array",
+            "Object",
+            "String",
+            "Number",
+        }
+
         for func, start, end in boundaries:
             caller_id = f"{self.file_path}:{func.name}"
             for ln in range(start, end + 1):
                 for call_match in self.CALL_RE.finditer(lines[ln - 1]):
                     callee = call_match.group(1)
+                    # Skip built-ins when creating relationships:
+                    if callee in JS_BUILTINS:
+                        continue  # Skip this relationship
                     relationship = CallRelationship(
                         caller=caller_id,
                         callee=callee,
@@ -168,22 +219,22 @@ class JavaScriptASTAnalyzer:
                         is_resolved=False,
                     )
                     self.call_relationships.append(relationship)
-    
+
     def _extract_function_declarations(self):
         """Extract function declarations from JavaScript AST."""
         # TODO: Parse function declarations
         pass
-    
+
     def _extract_arrow_functions(self):
         """Extract arrow function expressions."""
         # TODO: Parse arrow functions
         pass
-    
+
     def _extract_method_definitions(self):
         """Extract method definitions from classes and objects."""
         # TODO: Parse method definitions
         pass
-    
+
     def _extract_function_calls(self):
         """Extract function call relationships."""
         # TODO: Parse function calls and build relationships
@@ -193,13 +244,13 @@ class JavaScriptASTAnalyzer:
 class TypeScriptASTAnalyzer(JavaScriptASTAnalyzer):
     """
     AST analyzer for TypeScript files.
-    
+
     TODO: Implement using TypeScript AST parser like:
     - typescript npm package (via subprocess)
     - ts-morph (via subprocess)
     - or a Python-based TypeScript parser
     """
-    
+
     # The TypeScript analyzer reuses the same lightweight heuristics used for
     # JavaScript.  A dedicated TypeScript parser could improve accuracy (for
     # example by recognising generics and interface methods) but would require
@@ -211,17 +262,16 @@ class TypeScriptASTAnalyzer(JavaScriptASTAnalyzer):
     # The ``analyze`` method from the parent class already discovers functions
     # and calls, so no override is required.
 
-    
     def _extract_typed_functions(self):
         """Extract functions with TypeScript type annotations."""
         # TODO: Parse typed function declarations
         pass
-    
+
     def _extract_interfaces_and_types(self):
         """Extract interface and type definitions."""
         # TODO: Parse interfaces and type aliases
         pass
-    
+
     def _extract_generic_functions(self):
         """Extract generic function definitions."""
         # TODO: Parse generic functions
@@ -230,10 +280,13 @@ class TypeScriptASTAnalyzer(JavaScriptASTAnalyzer):
 
 # Helper functions to integrate JS/TS analyzers into CallGraphAnalyzer
 
-def analyze_javascript_file(file_path: str, content: str) -> tuple[List[Function], List[CallRelationship]]:
+
+def analyze_javascript_file(
+    file_path: str, content: str
+) -> tuple[List[Function], List[CallRelationship]]:
     """
     Analyze a JavaScript file and return functions and relationships.
-    
+
     This function is called by CallGraphAnalyzer._analyze_javascript_file()
     """
     analyzer = JavaScriptASTAnalyzer(file_path, content)
@@ -241,12 +294,14 @@ def analyze_javascript_file(file_path: str, content: str) -> tuple[List[Function
     return analyzer.functions, analyzer.call_relationships
 
 
-def analyze_typescript_file(file_path: str, content: str) -> tuple[List[Function], List[CallRelationship]]:
+def analyze_typescript_file(
+    file_path: str, content: str
+) -> tuple[List[Function], List[CallRelationship]]:
     """
     Analyze a TypeScript file and return functions and relationships.
-    
+
     This function is called by CallGraphAnalyzer._analyze_typescript_file()
     """
     analyzer = TypeScriptASTAnalyzer(file_path, content)
     analyzer.analyze()
-    return analyzer.functions, analyzer.call_relationships 
+    return analyzer.functions, analyzer.call_relationships

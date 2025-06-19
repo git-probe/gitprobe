@@ -13,7 +13,7 @@ from models.core import Function, CallRelationship
 class PythonASTAnalyzer(ast.NodeVisitor):
     """
     AST visitor to extract function information from Python code.
-    
+
     This analyzer traverses Python AST nodes to identify:
     - Function and method definitions
     - Function parameters and docstrings
@@ -25,7 +25,7 @@ class PythonASTAnalyzer(ast.NodeVisitor):
     def __init__(self, file_path: str, content: str):
         """
         Initialize the Python AST analyzer.
-        
+
         Args:
             file_path: Path to the Python file being analyzed
             content: Raw content of the Python file
@@ -40,7 +40,7 @@ class PythonASTAnalyzer(ast.NodeVisitor):
     def visit_ClassDef(self, node):
         """
         Visit class definition and track current class context.
-        
+
         Args:
             node: AST ClassDef node
         """
@@ -52,7 +52,7 @@ class PythonASTAnalyzer(ast.NodeVisitor):
     def visit_FunctionDef(self, node):
         """
         Visit function definition and extract function information.
-        
+
         Args:
             node: AST FunctionDef node
         """
@@ -63,19 +63,21 @@ class PythonASTAnalyzer(ast.NodeVisitor):
     def visit_AsyncFunctionDef(self, node):
         """
         Visit async function definition.
-        
+
         Args:
             node: AST AsyncFunctionDef node
         """
-        self.visit_FunctionDef(node)
+        func_info = self._extract_function_info(node)
+        self.functions.append(func_info)
+        self._extract_function_calls(node, func_info.name)
 
     def _extract_function_info(self, node) -> Function:
         """
         Extract comprehensive information from a function definition node.
-        
+
         Args:
             node: AST FunctionDef or AsyncFunctionDef node
-            
+
         Returns:
             Function: Complete function metadata
         """
@@ -120,7 +122,7 @@ class PythonASTAnalyzer(ast.NodeVisitor):
     def _extract_function_calls(self, func_node, func_name: str):
         """
         Extract function calls from within a function's body.
-        
+
         Args:
             func_node: AST function node to analyze
             func_name: Name of the containing function
@@ -128,7 +130,7 @@ class PythonASTAnalyzer(ast.NodeVisitor):
 
         class CallVisitor(ast.NodeVisitor):
             """Inner visitor to find function calls within a function."""
-            
+
             def __init__(self, analyzer):
                 self.analyzer = analyzer
                 self.caller_name = func_name
@@ -149,15 +151,49 @@ class PythonASTAnalyzer(ast.NodeVisitor):
             def _get_call_name(self, node) -> Optional[str]:
                 """
                 Extract function name from call node.
-                
+
                 Args:
                     node: AST node representing the function being called
-                    
+
                 Returns:
                     str: Function name or None if not extractable
                 """
+                # Add this set at the top of _get_call_name method:
+                PYTHON_BUILTINS = {
+                    "print",
+                    "len",
+                    "str",
+                    "int",
+                    "float",
+                    "bool",
+                    "list",
+                    "dict",
+                    "set",
+                    "tuple",
+                    "range",
+                    "enumerate",
+                    "zip",
+                    "map",
+                    "filter",
+                    "sorted",
+                    "reversed",
+                    "sum",
+                    "min",
+                    "max",
+                    "abs",
+                    "round",
+                    "isinstance",
+                    "hasattr",
+                    "getattr",
+                    "setattr",
+                }
+
+                # Then modify the return logic:
                 if isinstance(node, ast.Name):
-                    return node.id
+                    name = node.id
+                    if name in PYTHON_BUILTINS:
+                        return None  # Skip built-ins
+                    return name
                 elif isinstance(node, ast.Attribute):
                     if isinstance(node.value, ast.Name):
                         return f"{node.value.id}.{node.attr}"
@@ -169,20 +205,22 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         call_visitor.visit(func_node)
 
 
-def analyze_python_file(file_path: str, content: str) -> tuple[List[Function], List[CallRelationship]]:
+def analyze_python_file(
+    file_path: str, content: str
+) -> tuple[List[Function], List[CallRelationship]]:
     """
     Analyze a Python file and return functions and relationships.
-    
+
     This is the main entry point for Python file analysis that can be
     called by the CallGraphAnalyzer.
-    
+
     Args:
         file_path: Path to the Python file
         content: Content of the Python file
-        
+
     Returns:
         tuple: (functions, call_relationships)
-        
+
     Raises:
         SyntaxError: If the Python file has syntax errors
         Exception: If parsing fails for other reasons
@@ -197,4 +235,4 @@ def analyze_python_file(file_path: str, content: str) -> tuple[List[Function], L
         return [], []
     except Exception as e:
         print(f"⚠️ Error parsing {file_path}: {str(e)}")
-        return [], [] 
+        return [], []

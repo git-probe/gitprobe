@@ -15,10 +15,10 @@ from utils.patterns import CODE_EXTENSIONS
 class CallGraphAnalyzer:
     """
     Multi-language call graph analyzer.
-    
+
     This analyzer orchestrates language-specific AST analyzers to build
     comprehensive call graphs across different programming languages.
-    
+
     Supported languages:
     - Python (fully supported)
     - JavaScript (planned)
@@ -52,6 +52,9 @@ class CallGraphAnalyzer:
         # Resolve cross-language relationships
         self._resolve_call_relationships()
 
+        # After collecting all relationships, deduplicate:
+        self._deduplicate_relationships()
+
         # Generate visualization data
         viz_data = self._generate_visualization_data()
 
@@ -62,20 +65,20 @@ class CallGraphAnalyzer:
                 "languages_found": list(set(f.get("language") for f in code_files)),
                 "files_analyzed": len(code_files),
             },
-            "functions": [func.model_dump() for func in self.functions.values()],
-            "relationships": [rel.model_dump() for rel in self.call_relationships],
+            "functions": [func.dict() for func in self.functions.values()],
+            "relationships": [rel.dict() for rel in self.call_relationships],
             "visualization": viz_data,
         }
 
     def extract_code_files(self, file_tree: Dict) -> List[Dict]:
         """
         Extract code files from file tree structure.
-        
+
         Filters files based on supported extensions and excludes test/config files.
-        
+
         Args:
             file_tree: Nested dictionary representing file structure
-            
+
         Returns:
             List of code file information dictionaries
         """
@@ -108,9 +111,9 @@ class CallGraphAnalyzer:
     def _analyze_code_file(self, repo_dir: str, file_info: Dict):
         """
         Analyze a single code file based on its language.
-        
+
         Routes to appropriate language-specific analyzer.
-        
+
         Args:
             repo_dir: Repository directory path
             file_info: File information dictionary
@@ -129,23 +132,25 @@ class CallGraphAnalyzer:
             elif file_info["language"] == "typescript":
                 self._analyze_typescript_file(file_info["path"], content)
             else:
-                print(f"⚠️ Unsupported language: {file_info['language']} for {file_info['path']}")
-                
+                print(
+                    f"⚠️ Unsupported language: {file_info['language']} for {file_info['path']}"
+                )
+
         except Exception as e:
             print(f"⚠️ Error analyzing {file_info['path']}: {str(e)}")
 
     def _analyze_python_file(self, file_path: str, content: str):
         """
         Analyze Python file using Python AST analyzer.
-        
+
         Args:
             file_path: Relative path to the Python file
             content: File content string
         """
         from .python_analyzer import analyze_python_file
-        
+
         functions, relationships = analyze_python_file(file_path, content)
-        
+
         # Store functions with unique identifiers
         for func in functions:
             func_id = f"{file_path}:{func.name}"
@@ -157,15 +162,15 @@ class CallGraphAnalyzer:
     def _analyze_javascript_file(self, file_path: str, content: str):
         """
         Analyze JavaScript file using JavaScript AST analyzer.
-        
+
         Args:
             file_path: Relative path to the JavaScript file
             content: File content string
         """
         from .js_analyzer import analyze_javascript_file
-        
+
         functions, relationships = analyze_javascript_file(file_path, content)
-        
+
         # Store functions with unique identifiers
         for func in functions:
             func_id = f"{file_path}:{func.name}"
@@ -177,15 +182,15 @@ class CallGraphAnalyzer:
     def _analyze_typescript_file(self, file_path: str, content: str):
         """
         Analyze TypeScript file using TypeScript AST analyzer.
-        
+
         Args:
             file_path: Relative path to the TypeScript file
             content: File content string
         """
         from .js_analyzer import analyze_typescript_file
-        
+
         functions, relationships = analyze_typescript_file(file_path, content)
-        
+
         # Store functions with unique identifiers
         for func in functions:
             func_id = f"{file_path}:{func.name}"
@@ -197,7 +202,7 @@ class CallGraphAnalyzer:
     def _resolve_call_relationships(self):
         """
         Resolve function call relationships across all languages.
-        
+
         Attempts to match function calls to actual function definitions,
         handling cross-language calls where possible.
         """
@@ -221,12 +226,31 @@ class CallGraphAnalyzer:
                     relationship.callee = func_lookup[method_name]
                     relationship.is_resolved = True
 
+    def _deduplicate_relationships(self):
+        """
+        Deduplicate call relationships based on caller-callee pairs.
+
+        Removes duplicate relationships while preserving the first occurrence.
+        This helps eliminate noise from multiple calls to the same function.
+        """
+        seen = set()
+        unique_relationships = []
+
+        for rel in self.call_relationships:
+            # Create unique key (ignore line numbers)
+            key = (rel.caller, rel.callee)
+            if key not in seen:
+                seen.add(key)
+                unique_relationships.append(rel)
+
+        self.call_relationships = unique_relationships
+
     def _generate_visualization_data(self) -> Dict:
         """
         Generate visualization data for graph rendering.
-        
+
         Creates Cytoscape.js compatible graph data with nodes and edges.
-        
+
         Returns:
             Dict: Visualization data with cytoscape elements and summary
         """
@@ -240,7 +264,7 @@ class CallGraphAnalyzer:
                 node_classes.append("node-method")
             else:
                 node_classes.append("node-function")
-            
+
             # Add language-specific styling
             file_ext = Path(func_info.file_path).suffix.lower()
             if file_ext == ".py":
@@ -257,7 +281,7 @@ class CallGraphAnalyzer:
                         "label": func_info.name,
                         "file": func_info.file_path,
                         "type": "method" if func_info.is_method else "function",
-                        "language": CODE_EXTENSIONS.get(file_ext, "unknown")
+                        "language": CODE_EXTENSIONS.get(file_ext, "unknown"),
                     },
                     "classes": " ".join(node_classes),
                 }
@@ -289,4 +313,41 @@ class CallGraphAnalyzer:
                     [r for r in self.call_relationships if not r.is_resolved]
                 ),
             },
-        } 
+        }
+
+    def generate_llm_format(self) -> Dict:
+        """Generate clean format optimized for LLM consumption."""
+        return {
+            "functions": [
+                {
+                    "name": func.name,
+                    "file": Path(func.file_path).name,  # Just filename
+                    "purpose": (
+                        func.docstring.split("\n")[0] if func.docstring else None
+                    ),
+                    "parameters": func.parameters,
+                    "is_recursive": func.name
+                    in [
+                        rel.callee
+                        for rel in self.call_relationships
+                        if rel.caller.endswith(func.name)
+                    ],
+                }
+                for func in self.functions.values()
+            ],
+            "relationships": {
+                func.name: {
+                    "calls": [
+                        rel.callee.split(":")[-1]
+                        for rel in self.call_relationships
+                        if rel.caller.endswith(func.name) and rel.is_resolved
+                    ],
+                    "called_by": [
+                        rel.caller.split(":")[-1]
+                        for rel in self.call_relationships
+                        if rel.callee.endswith(func.name) and rel.is_resolved
+                    ],
+                }
+                for func in self.functions.values()
+            },
+        }

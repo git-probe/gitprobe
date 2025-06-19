@@ -39,11 +39,11 @@ class ErrorResponse(BaseModel):
 async def analyze_repo(request: AnalyzeRequest):
     """
     API endpoint for complete repository analysis including call graphs.
-    
+
     Supports multiple programming languages:
     - Python (fully supported)
     - JavaScript/TypeScript (coming soon)
-    
+
     The analysis service handles all orchestration including:
     - Repository cloning and cleanup
     - File structure analysis with filtering
@@ -54,9 +54,7 @@ async def analyze_repo(request: AnalyzeRequest):
         # Use the centralized analysis service
         analysis_service = AnalysisService()
         analysis_result = analysis_service.analyze_repository_full(
-            str(request.github_url), 
-            request.include_patterns, 
-            request.exclude_patterns
+            str(request.github_url), request.include_patterns, request.exclude_patterns
         )
 
         # Convert AnalysisResult to dict for API response
@@ -70,7 +68,7 @@ async def analyze_repo(request: AnalyzeRequest):
 async def analyze_structure_only(request: StructureOnlyRequest):
     """
     API endpoint for lightweight repository structure analysis.
-    
+
     Performs file tree analysis without call graph generation:
     - Faster execution
     - Lower resource usage
@@ -79,12 +77,36 @@ async def analyze_structure_only(request: StructureOnlyRequest):
     try:
         # Use the centralized analysis service for structure-only analysis
         analysis_service = AnalysisService()
-        result = analysis_service.analyze_repository_structure_only(str(request.github_url))
+        result = analysis_service.analyze_repository_structure_only(
+            str(request.github_url)
+        )
 
         return AnalysisResponse(status="success", data=result)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Structure analysis failed: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Structure analysis failed: {str(e)}"
+        )
+
+
+@app.post("/analyze/llm-context")
+async def get_llm_context(request: AnalyzeRequest):
+    """Get clean, LLM-optimized analysis data."""
+    try:
+        analysis_service = AnalysisService()
+        result = analysis_service.analyze_repository_full(
+            str(request.github_url), request.include_patterns, request.exclude_patterns
+        )
+
+        # Generate clean LLM format
+        llm_data = analysis_service.call_graph_analyzer.generate_llm_format()
+
+        return {"status": "success", "data": llm_data}
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"LLM context analysis failed: {str(e)}"
+        )
 
 
 @app.get("/")
@@ -107,6 +129,7 @@ if __name__ == "__main__":
 
 # Example usage:
 """
+# Full analysis with visualization data
 curl -X POST http://localhost:8000/analyze \
   -H "Content-Type: application/json" \
   -d '{
@@ -115,10 +138,20 @@ curl -X POST http://localhost:8000/analyze \
     "exclude_patterns": ["*test*", "*spec*"]
   }'
 
+# Structure-only analysis (lightweight)
 curl -X POST http://localhost:8000/analyze/structure-only \
   -H "Content-Type: application/json" \
   -d '{
     "github_url": "https://github.com/user/repo"
+  }'
+
+# LLM-optimized context (clean, structured for AI consumption)
+curl -X POST http://localhost:8000/analyze/llm-context \
+  -H "Content-Type: application/json" \
+  -d '{
+    "github_url": "https://github.com/user/repo",
+    "include_patterns": ["*.py"],
+    "exclude_patterns": ["*test*", "*spec*"]
   }'
 
 # Access interactive API docs at: http://localhost:8000/docs
