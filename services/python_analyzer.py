@@ -6,9 +6,12 @@ function definitions, method information, and function call relationships.
 """
 
 import ast
-from typing import List, Optional
+import logging
+from typing import List, Tuple
+from pathlib import Path
 from models.core import Function, CallRelationship
 
+logger = logging.getLogger(__name__)
 
 class PythonASTAnalyzer(ast.NodeVisitor):
     """
@@ -32,44 +35,70 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         """
         self.file_path = file_path
         self.content = content
-        self.lines = content.split("\n")
+        self.lines = content.splitlines()
         self.functions: List[Function] = []
-        self.current_class = None
         self.call_relationships: List[CallRelationship] = []
+        self.current_class_name: str | None = None
+        self.current_function_name: str | None = None
 
-    def visit_ClassDef(self, node):
+    def visit_ClassDef(self, node: ast.ClassDef):
         """
         Visit class definition and track current class context.
 
         Args:
             node: AST ClassDef node
         """
-        old_class = self.current_class
-        self.current_class = node.name
+        self.current_class_name = node.name
         self.generic_visit(node)
-        self.current_class = old_class
+        self.current_class_name = None
 
-    def visit_FunctionDef(self, node):
+    def visit_FunctionDef(self, node: ast.FunctionDef):
         """
         Visit function definition and extract function information.
 
         Args:
             node: AST FunctionDef node
         """
-        func_info = self._extract_function_info(node)
-        self.functions.append(func_info)
-        self._extract_function_calls(node, func_info.name)
+        self.current_function_name = node.name
+        
+        # Ensure file_path is a string
+        file_path_str = str(self.file_path)
 
-    def visit_AsyncFunctionDef(self, node):
-        """
-        Visit async function definition.
+        function_obj = Function(
+            name=node.name,
+            file_path=file_path_str,
+            line_start=node.lineno,
+            line_end=node.end_lineno,
+            parameters=[arg.arg for arg in node.args.args],
+            docstring=ast.get_docstring(node),
+            is_method=self.current_class_name is not None,
+            class_name=self.current_class_name,
+            code_snippet="\n".join(self.lines[node.lineno - 1:node.end_lineno])
+        )
+        self.functions.append(function_obj)
+        self.generic_visit(node)
+        self.current_function_name = None
 
-        Args:
-            node: AST AsyncFunctionDef node
-        """
-        func_info = self._extract_function_info(node)
-        self.functions.append(func_info)
-        self._extract_function_calls(node, func_info.name)
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        self.current_function_name = node.name
+
+        # Ensure file_path is a string
+        file_path_str = str(self.file_path)
+
+        function_obj = Function(
+            name=node.name,
+            file_path=file_path_str,
+            line_start=node.lineno,
+            line_end=node.end_lineno,
+            parameters=[arg.arg for arg in node.args.args],
+            docstring=ast.get_docstring(node),
+            is_method=self.current_class_name is not None,
+            class_name=self.current_class_name,
+            code_snippet="\n".join(self.lines[node.lineno - 1:node.end_lineno])
+        )
+        self.functions.append(function_obj)
+        self.generic_visit(node)
+        self.current_function_name = None
 
     def _extract_function_info(self, node) -> Function:
         """
@@ -103,8 +132,8 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         class_name = None
         is_method = False
 
-        if self.current_class:
-            class_name = self.current_class
+        if self.current_class_name:
+            class_name = self.current_class_name
             is_method = True
 
         return Function(
@@ -148,7 +177,7 @@ class PythonASTAnalyzer(ast.NodeVisitor):
                     self.analyzer.call_relationships.append(relationship)
                 self.generic_visit(node)
 
-            def _get_call_name(self, node) -> Optional[str]:
+            def _get_call_name(self, node) -> str | None:
                 """
                 Extract function name from call node.
 
@@ -204,10 +233,17 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         call_visitor = CallVisitor(self)
         call_visitor.visit(func_node)
 
+    def analyze(self):
+        try:
+            tree = ast.parse(self.content)
+            self.visit(tree)
+        except SyntaxError as e:
+            logger.warning(f"⚠️ Could not parse {self.file_path}: {e}")
+        except Exception as e:
+            logger.error(f"⚠️ Error analyzing {self.file_path}: {e}", exc_info=True)
 
-def analyze_python_file(
-    file_path: str, content: str
-) -> tuple[List[Function], List[CallRelationship]]:
+
+def analyze_python_file(file_path: str, content: str) -> Tuple[List[Function], List[CallRelationship]]:
     """
     Analyze a Python file and return functions and relationships.
 
@@ -225,14 +261,6 @@ def analyze_python_file(
         SyntaxError: If the Python file has syntax errors
         Exception: If parsing fails for other reasons
     """
-    try:
-        tree = ast.parse(content)
-        analyzer = PythonASTAnalyzer(file_path, content)
-        analyzer.visit(tree)
-        return analyzer.functions, analyzer.call_relationships
-    except SyntaxError as e:
-        print(f"⚠️ Syntax error in {file_path}: {str(e)}")
-        return [], []
-    except Exception as e:
-        print(f"⚠️ Error parsing {file_path}: {str(e)}")
-        return [], []
+    analyzer = PythonASTAnalyzer(file_path, content)
+    analyzer.analyze()
+    return analyzer.functions, analyzer.call_relationships

@@ -71,14 +71,18 @@ class AnalysisService:
             repo_info = self._parse_repository_info(github_url)
 
             # Step 2: Analyze file structure
+            logger.info("Analyzing repository file structure...")
             structure_result = self._analyze_structure(
                 temp_dir, include_patterns, exclude_patterns
             )
+            logger.info(f"Found {structure_result['summary']['total_files']} files to analyze.")
 
             # Step 3: Multi-language call graph analysis
+            logger.info("Starting call graph analysis...")
             call_graph_result = self._analyze_call_graph(
                 structure_result["file_tree"], temp_dir
             )
+            logger.info(f"Call graph analysis complete. Found {call_graph_result['call_graph']['total_functions']} functions.")
 
             # Step 3.5: Read README file
             readme_content = self._read_readme_file(temp_dir)
@@ -107,6 +111,7 @@ class AnalysisService:
             )
 
             # Step 5: Cleanup
+            logger.info(f"Cleaning up temporary repository directory: {temp_dir}")
             self._cleanup_repository(temp_dir)
 
             logger.info(
@@ -115,10 +120,11 @@ class AnalysisService:
             return analysis_result
 
         except Exception as e:
-            if temp_dir:
+            logger.error(f"Analysis failed: {str(e)}", exc_info=True)
+            # Ensure cleanup happens even on failure
+            if 'temp_dir' in locals() and Path(temp_dir).exists():
                 self._cleanup_repository(temp_dir)
-            logger.error(f"Analysis failed for {github_url}: {str(e)}")
-            raise RuntimeError(f"Repository analysis failed: {str(e)}") from e
+            raise RuntimeError(f"Repository analysis failed: {str(e)}")
 
     def analyze_repository_structure_only(
         self,
@@ -175,8 +181,10 @@ class AnalysisService:
             raise RuntimeError(f"Structure analysis failed: {str(e)}") from e
 
     def _clone_repository(self, github_url: str) -> str:
-        """Clone repository and track for cleanup."""
+        """Clone repository and return temp dir path."""
+        logger.info(f"Cloning {github_url}...")
         temp_dir = clone_repository(github_url)
+        logger.info(f"Repository cloned to {temp_dir}")
         self._temp_directories.append(temp_dir)
         return temp_dir
 
@@ -191,6 +199,7 @@ class AnalysisService:
         exclude_patterns: Optional[List[str]],
     ) -> Dict[str, Any]:
         """Analyze repository file structure with filtering."""
+        logger.info(f"Initializing RepoAnalyzer with include: {include_patterns}, exclude: {exclude_patterns}")
         repo_analyzer = RepoAnalyzer(include_patterns, exclude_patterns)
         return repo_analyzer.analyze_repository_structure(repo_dir)
 
@@ -201,10 +210,12 @@ class AnalysisService:
             readme_path = Path(repo_dir) / name
             if readme_path.exists():
                 try:
+                    logger.info(f"Found README file at {readme_path}")
                     return readme_path.read_text(encoding="utf-8")
                 except Exception as e:
-                    print(f"Warning: Could not read README file at {readme_path}: {e}")
+                    logger.warning(f"Could not read README file at {readme_path}: {e}")
                     return None
+        logger.info("No README file found in repository root.")
         return None
 
     def _analyze_call_graph(
@@ -218,12 +229,14 @@ class AnalysisService:
         - JavaScript/TypeScript AST analysis (planned)
         - Additional language support (future)
         """
-        # Extract code files for all supported languages
+        logger.info("Extracting code files from file tree...")
         code_files = self.call_graph_analyzer.extract_code_files(file_tree)
-
+        
         # Filter by supported languages (will expand as we add JS/TS support)
+        logger.info(f"Found {len(code_files)} total code files. Filtering for supported languages.")
         supported_files = self._filter_supported_languages(code_files)
-
+        logger.info(f"Analyzing {len(supported_files)} supported files.")
+        
         # Perform multi-language analysis
         result = self.call_graph_analyzer.analyze_code_files(supported_files, repo_dir)
 
@@ -254,13 +267,11 @@ class AnalysisService:
         return ["python", "javascript", "typescript", "c", "cpp"]
 
     def _cleanup_repository(self, temp_dir: str):
-        """Clean up temporary repository directory."""
-        try:
-            cleanup_repository(temp_dir)
-            if temp_dir in self._temp_directories:
-                self._temp_directories.remove(temp_dir)
-        except Exception as e:
-            logger.warning(f"Failed to cleanup {temp_dir}: {str(e)}")
+        """Clean up cloned repository."""
+        logger.info(f"Attempting to clean up {temp_dir}")
+        cleanup_repository(temp_dir)
+        if temp_dir in self._temp_directories:
+            self._temp_directories.remove(temp_dir)
 
     def cleanup_all(self):
         """Clean up all tracked temporary directories."""

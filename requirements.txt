@@ -3,4 +3,6 @@ pathspec==0.12.1
 requests==2.31.0
 pydantic>=2.0.0
 fastapi>=0.100.0
-uvicorn>=0.23.0 
+uvicorn>=0.23.0
+python-multipart
+tree-sitter 

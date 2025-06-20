@@ -6,8 +6,32 @@ This will be integrated into the AnalysisService to support multi-language analy
 """
 
 import re
-from typing import List
+import logging
+from typing import List, Tuple
 from models.core import Function, CallRelationship
+from tree_sitter import Language, Parser
+
+# TODO: Add proper error handling and logging
+logger = logging.getLogger(__name__)
+
+# --- Tree-sitter Language Setup ---
+# You must build the tree-sitter languages before running
+# See: https://github.com/tree-sitter/py-tree-sitter#installation
+try:
+    logger.info("Attempting to load tree-sitter JavaScript language")
+    # Modern tree-sitter API - build library first, then load languages
+    from tree_sitter import Language
+    
+    # For now, we'll disable tree-sitter parsing and fall back to regex-based analysis
+    # This is because tree-sitter requires pre-built language files that aren't included
+    logger.warning("Tree-sitter languages not available - using regex-based analysis fallback")
+    JS_LANGUAGE = None
+    TS_LANGUAGE = None
+    
+except Exception as e:
+    logger.error(f"Error loading tree-sitter languages: {e}", exc_info=True)
+    JS_LANGUAGE = None
+    TS_LANGUAGE = None
 
 
 class JavaScriptASTAnalyzer:
@@ -75,8 +99,14 @@ class JavaScriptASTAnalyzer:
     }
 
     FUNCTION_DECL_RE = re.compile(r"^\s*function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+    EXPORT_FUNCTION_RE = re.compile(r"^\s*export\s+function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+    EXPORT_DEFAULT_FUNCTION_RE = re.compile(r"^\s*export\s+default\s+function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+    EXPORT_DEFAULT_ANON_FUNCTION_RE = re.compile(r"^\s*export\s+default\s+function\s*\(")
     ARROW_FUNCTION_RE = re.compile(
         r"^\s*(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>"
+    )
+    EXPORT_ARROW_FUNCTION_RE = re.compile(
+        r"^\s*export\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>"
     )
     # Method definition – best-effort: `<name>(...) {` that is not a control keyword
     METHOD_DEF_RE = re.compile(
@@ -86,15 +116,18 @@ class JavaScriptASTAnalyzer:
     CALL_RE = re.compile(r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
 
     def __init__(self, file_path: str, content: str):
+        logger.info(f"JavaScriptASTAnalyzer.__init__ called with file_path='{file_path}', content_length={len(content)}")
+        
         self.file_path = file_path
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
+        
+        logger.info("JavaScriptASTAnalyzer.__init__ completed successfully")
 
     def analyze(self):
-        """Parse the JavaScript file and populate ``self.functions`` and
-        ``self.call_relationships`` using regex-based heuristics.
-        """
+        """Parse the JavaScript file and populate functions and relationships using regex-based heuristics."""
+        logger.info("Starting regex-based JavaScript analysis")
         self.functions = []
         self.call_relationships = []
 
@@ -103,10 +136,7 @@ class JavaScriptASTAnalyzer:
 
         # Second pass – discover call relationships inside the known functions
         self._discover_calls()
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+        logger.info(f"Regex analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships")
 
     def _discover_functions(self):
         """Locate function definitions (declarations, arrows, methods)."""
@@ -114,24 +144,54 @@ class JavaScriptASTAnalyzer:
         for idx, line in enumerate(lines, 1):
             line_stripped = line.rstrip()
 
-            match = self.FUNCTION_DECL_RE.match(line_stripped)
+            # Check different function patterns in order of specificity
+            name = None
+            
+            # 1. Export default function with name
+            match = self.EXPORT_DEFAULT_FUNCTION_RE.match(line_stripped)
             if match:
                 name = match.group(1)
             else:
-                match = self.ARROW_FUNCTION_RE.match(line_stripped)
+                # 2. Export default anonymous function
+                match = self.EXPORT_DEFAULT_ANON_FUNCTION_RE.match(line_stripped)
                 if match:
-                    name = match.group(1)
+                    name = "default"  # Use "default" as the function name
                 else:
-                    match = self.METHOD_DEF_RE.match(line_stripped)
+                    # 3. Export function
+                    match = self.EXPORT_FUNCTION_RE.match(line_stripped)
                     if match:
                         name = match.group(1)
-                        # Skip JavaScript keywords
-                        if name in self.JS_KEYWORDS:
-                            continue
                     else:
-                        continue
+                        # 4. Export arrow function
+                        match = self.EXPORT_ARROW_FUNCTION_RE.match(line_stripped)
+                        if match:
+                            name = match.group(1)
+                        else:
+                            # 5. Regular function declaration
+                            match = self.FUNCTION_DECL_RE.match(line_stripped)
+                            if match:
+                                name = match.group(1)
+                            else:
+                                # 6. Regular arrow function
+                                match = self.ARROW_FUNCTION_RE.match(line_stripped)
+                                if match:
+                                    name = match.group(1)
+                                else:
+                                    # 7. Method definition
+                                    match = self.METHOD_DEF_RE.match(line_stripped)
+                                    if match:
+                                        name = match.group(1)
+                                        # Skip JavaScript keywords
+                                        if name in self.JS_KEYWORDS:
+                                            continue
+                                    else:
+                                        continue
+
+            if not name:
+                continue
 
             # Extract parameters if possible
+            import re
             params_match = re.search(r"\(([^)]*)\)", line_stripped)
             params = (
                 [p.strip() for p in params_match.group(1).split(",") if p.strip()]
@@ -139,23 +199,29 @@ class JavaScriptASTAnalyzer:
                 else []
             )
 
-            # -------- Determine end of function for code snippet ----------
+            # Determine end of function for code snippet
             end_line_idx = idx - 1  # zero-based index into lines list
             brace_depth = line_stripped.count("{") - line_stripped.count("}")
 
             if brace_depth > 0:
-                for j in range(end_line_idx + 1, len(lines)):
+                # Add safety limit to prevent infinite loops
+                max_lines_to_check = min(len(lines) - end_line_idx - 1, 1000)
+                for j in range(end_line_idx + 1, end_line_idx + 1 + max_lines_to_check):
+                    if j >= len(lines):
+                        break
                     brace_depth += lines[j].count("{") - lines[j].count("}")
                     if brace_depth <= 0:
                         end_line_idx = j
                         break
-            # If we never opened a brace (e.g., concise arrow fn) we keep single line
 
             code_snippet = "\n".join(lines[idx - 1 : end_line_idx + 1])
+            
+            # Ensure file_path is a string (fix for Pydantic validation)
+            file_path_str = str(self.file_path)
 
             func = Function(
                 name=name,
-                file_path=self.file_path,
+                file_path=file_path_str,
                 line_start=idx,
                 line_end=end_line_idx + 1,
                 parameters=params,
@@ -188,7 +254,7 @@ class JavaScriptASTAnalyzer:
             )
             boundaries.append((func, start_line, end_line))
 
-        # Add similar filtering:
+        # Add filtering for built-ins:
         JS_BUILTINS = {
             "console",
             "setTimeout",
@@ -211,7 +277,7 @@ class JavaScriptASTAnalyzer:
                     callee = call_match.group(1)
                     # Skip built-ins when creating relationships:
                     if callee in JS_BUILTINS:
-                        continue  # Skip this relationship
+                        continue
                     relationship = CallRelationship(
                         caller=caller_id,
                         callee=callee,
@@ -219,26 +285,6 @@ class JavaScriptASTAnalyzer:
                         is_resolved=False,
                     )
                     self.call_relationships.append(relationship)
-
-    def _extract_function_declarations(self):
-        """Extract function declarations from JavaScript AST."""
-        # TODO: Parse function declarations
-        pass
-
-    def _extract_arrow_functions(self):
-        """Extract arrow function expressions."""
-        # TODO: Parse arrow functions
-        pass
-
-    def _extract_method_definitions(self):
-        """Extract method definitions from classes and objects."""
-        # TODO: Parse method definitions
-        pass
-
-    def _extract_function_calls(self):
-        """Extract function call relationships."""
-        # TODO: Parse function calls and build relationships
-        pass
 
 
 class TypeScriptASTAnalyzer(JavaScriptASTAnalyzer):
@@ -256,8 +302,29 @@ class TypeScriptASTAnalyzer(JavaScriptASTAnalyzer):
     # example by recognising generics and interface methods) but would require
     # external dependencies.  For now the parent implementation is sufficient.
 
+    # Override patterns to ensure TypeScript-specific exports are captured
+    FUNCTION_DECL_RE = re.compile(r"^\s*function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+    EXPORT_FUNCTION_RE = re.compile(r"^\s*export\s+function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+    EXPORT_DEFAULT_FUNCTION_RE = re.compile(r"^\s*export\s+default\s+function\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
+    EXPORT_DEFAULT_ANON_FUNCTION_RE = re.compile(r"^\s*export\s+default\s+function\s*\(")
+    ARROW_FUNCTION_RE = re.compile(
+        r"^\s*(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>"
+    )
+    EXPORT_ARROW_FUNCTION_RE = re.compile(
+        r"^\s*export\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>"
+    )
+    # Method definition – best-effort: `<name>(...) {` that is not a control keyword
+    METHOD_DEF_RE = re.compile(
+        r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*{", re.ASCII
+    )
+
     def __init__(self, file_path: str, content: str):
+        logger.info(f"TypeScriptASTAnalyzer.__init__ called with file_path='{file_path}', content_length={len(content)}")
+        
+        # Just call the parent constructor - no tree-sitter needed
         super().__init__(file_path, content)
+        
+        logger.info("TypeScriptASTAnalyzer.__init__ completed successfully")
 
     # The ``analyze`` method from the parent class already discovers functions
     # and calls, so no override is required.
@@ -289,9 +356,17 @@ def analyze_javascript_file(
 
     This function is called by CallGraphAnalyzer._analyze_javascript_file()
     """
-    analyzer = JavaScriptASTAnalyzer(file_path, content)
-    analyzer.analyze()
-    return analyzer.functions, analyzer.call_relationships
+    try:
+        logger.info(f"analyze_javascript_file called with file_path='{file_path}', content_length={len(content)}")
+        logger.info(f"About to create JavaScriptASTAnalyzer instance")
+        analyzer = JavaScriptASTAnalyzer(file_path, content)
+        logger.info(f"JavaScriptASTAnalyzer created successfully, calling analyze()")
+        analyzer.analyze()
+        logger.info(f"Analysis complete, returning {len(analyzer.functions)} functions and {len(analyzer.call_relationships)} relationships")
+        return analyzer.functions, analyzer.call_relationships
+    except Exception as e:
+        logger.error(f"Error in analyze_javascript_file for {file_path}: {e}", exc_info=True)
+        return [], []
 
 
 def analyze_typescript_file(
@@ -299,9 +374,16 @@ def analyze_typescript_file(
 ) -> tuple[List[Function], List[CallRelationship]]:
     """
     Analyze a TypeScript file and return functions and relationships.
-
     This function is called by CallGraphAnalyzer._analyze_typescript_file()
     """
-    analyzer = TypeScriptASTAnalyzer(file_path, content)
-    analyzer.analyze()
-    return analyzer.functions, analyzer.call_relationships
+    try:
+        logger.info(f"analyze_typescript_file called with file_path='{file_path}', content_length={len(content)}")
+        logger.info(f"About to create TypeScriptASTAnalyzer instance")
+        analyzer = TypeScriptASTAnalyzer(file_path, content)
+        logger.info(f"TypeScriptASTAnalyzer created successfully, calling analyze()")
+        analyzer.analyze()
+        logger.info(f"Analysis complete, returning {len(analyzer.functions)} functions and {len(analyzer.call_relationships)} relationships")
+        return analyzer.functions, analyzer.call_relationships
+    except Exception as e:
+        logger.error(f"Error in analyze_typescript_file for {file_path}: {e}", exc_info=True)
+        return [], []
