@@ -28,7 +28,8 @@ class CallGraphAnalyzer:
     - TypeScript (tree-sitter AST parsing - high accuracy, supports exports/imports)
     - C (fully supported with AST parsing)
     - C++ (fully supported with AST parsing)
-    
+    - Go (fully supported with tree-sitter AST parsing)
+
     Key improvements:
     - JavaScript/TypeScript now use tree-sitter for 99%+ accuracy
     - Properly handles export/import statements, arrow functions, class methods
@@ -70,7 +71,9 @@ class CallGraphAnalyzer:
         # After collecting all relationships, deduplicate:
         logger.info("Deduplicating call relationships.")
         self._deduplicate_relationships()
-        logger.info(f"Deduplication complete. {len(self.call_relationships)} unique relationships found.")
+        logger.info(
+            f"Deduplication complete. {len(self.call_relationships)} unique relationships found."
+        )
 
         # Generate visualization data
         logger.info("Generating visualization data.")
@@ -156,8 +159,12 @@ class CallGraphAnalyzer:
                 self._analyze_c_file(file_path, content)
             elif language == "cpp":
                 self._analyze_cpp_file(file_path, content)
+            elif language == "go":
+                self._analyze_go_file(file_path, content)
             else:
-                logger.warning(f"Unsupported language for call graph analysis: {language} for file {file_path}")
+                logger.warning(
+                    f"Unsupported language for call graph analysis: {language} for file {file_path}"
+                )
 
         except Exception as e:
             logger.error(f"⚠️ Error analyzing {file_path}: {str(e)}")
@@ -174,7 +181,9 @@ class CallGraphAnalyzer:
 
         try:
             functions, relationships = analyze_python_file(file_path, content)
-            logger.info(f"Found {len(functions)} functions and {len(relationships)} relationships in {file_path}")
+            logger.info(
+                f"Found {len(functions)} functions and {len(relationships)} relationships in {file_path}"
+            )
 
             # Store functions with unique identifiers
             for func in functions:
@@ -184,7 +193,9 @@ class CallGraphAnalyzer:
             # Store call relationships
             self.call_relationships.extend(relationships)
         except Exception as e:
-            logger.error(f"Failed to analyze Python file {file_path}: {e}", exc_info=True)
+            logger.error(
+                f"Failed to analyze Python file {file_path}: {e}", exc_info=True
+            )
 
     def _analyze_javascript_file(self, file_path: str, content: str):
         """
@@ -199,9 +210,15 @@ class CallGraphAnalyzer:
             # Use the new tree-sitter based analyzer
             from .js_analyzer_new import analyze_javascript_file_treesitter
 
-            logger.info(f"About to call analyze_javascript_file_treesitter with args: file_path='{file_path}', content_length={len(content)}")
-            functions, relationships = analyze_javascript_file_treesitter(file_path, content)
-            logger.info(f"Tree-sitter JavaScript analysis completed for {file_path}: {len(functions)} functions, {len(relationships)} relationships")
+            logger.info(
+                f"About to call analyze_javascript_file_treesitter with args: file_path='{file_path}', content_length={len(content)}"
+            )
+            functions, relationships = analyze_javascript_file_treesitter(
+                file_path, content
+            )
+            logger.info(
+                f"Tree-sitter JavaScript analysis completed for {file_path}: {len(functions)} functions, {len(relationships)} relationships"
+            )
 
             # Store functions with unique identifiers
             for func in functions:
@@ -211,7 +228,9 @@ class CallGraphAnalyzer:
             # Store call relationships
             self.call_relationships.extend(relationships)
         except Exception as e:
-            logger.error(f"Failed to analyze JavaScript file {file_path}: {e}", exc_info=True)
+            logger.error(
+                f"Failed to analyze JavaScript file {file_path}: {e}", exc_info=True
+            )
 
     def _analyze_typescript_file(self, file_path: str, content: str):
         """
@@ -226,9 +245,15 @@ class CallGraphAnalyzer:
             # Use the new tree-sitter based analyzer
             from .js_analyzer_new import analyze_typescript_file_treesitter
 
-            logger.info(f"About to call analyze_typescript_file_treesitter with args: file_path='{file_path}', content_length={len(content)}")
-            functions, relationships = analyze_typescript_file_treesitter(file_path, content)
-            logger.info(f"Tree-sitter TypeScript analysis completed for {file_path}: {len(functions)} functions, {len(relationships)} relationships")
+            logger.info(
+                f"About to call analyze_typescript_file_treesitter with args: file_path='{file_path}', content_length={len(content)}"
+            )
+            functions, relationships = analyze_typescript_file_treesitter(
+                file_path, content
+            )
+            logger.info(
+                f"Tree-sitter TypeScript analysis completed for {file_path}: {len(functions)} functions, {len(relationships)} relationships"
+            )
 
             # Store functions with unique identifiers
             for func in functions:
@@ -238,7 +263,9 @@ class CallGraphAnalyzer:
             # Store call relationships
             self.call_relationships.extend(relationships)
         except Exception as e:
-            logger.error(f"Failed to analyze TypeScript file {file_path}: {e}", exc_info=True)
+            logger.error(
+                f"Failed to analyze TypeScript file {file_path}: {e}", exc_info=True
+            )
 
     def _analyze_c_file(self, file_path: str, content: str):
         """
@@ -280,6 +307,32 @@ class CallGraphAnalyzer:
         # Store call relationships
         self.call_relationships.extend(relationships)
 
+    def _analyze_go_file(self, file_path: str, content: str):
+        """
+        Analyze Go file using Go AST analyzer.
+
+        Args:
+            file_path: Relative path to the Go file
+            content: File content string
+        """
+        from .go_analyzer import analyze_go_file_treesitter
+
+        try:
+            functions, relationships = analyze_go_file_treesitter(file_path, content)
+            logger.info(
+                f"Found {len(functions)} functions and {len(relationships)} relationships in {file_path}"
+            )
+
+            # Store functions with unique identifiers
+            for func in functions:
+                func_id = f"{file_path}:{func.name}"
+                self.functions[func_id] = func
+
+            # Store call relationships
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze Go file {file_path}: {e}", exc_info=True)
+
     def _resolve_call_relationships(self):
         """
         Resolve function call relationships across all languages.
@@ -310,7 +363,9 @@ class CallGraphAnalyzer:
                     relationship.callee = func_lookup[method_name]
                     relationship.is_resolved = True
 
-        logger.info(f"Resolved {resolved_count}/{len(self.call_relationships)} call relationships.")
+        logger.info(
+            f"Resolved {resolved_count}/{len(self.call_relationships)} call relationships."
+        )
 
     def _deduplicate_relationships(self):
         """
@@ -329,7 +384,9 @@ class CallGraphAnalyzer:
                 seen.add(key)
                 unique_relationships.append(rel)
 
-        logger.debug(f"Removed {len(self.call_relationships) - len(unique_relationships)} duplicate relationships.")
+        logger.debug(
+            f"Removed {len(self.call_relationships) - len(unique_relationships)} duplicate relationships."
+        )
         self.call_relationships = unique_relationships
 
     def _generate_visualization_data(self) -> Dict:

@@ -6,3 +6,8 @@ fastapi>=0.100.0
 uvicorn>=0.23.0
 python-multipart
 tree-sitter 
+tree-sitter-c
+tree-sitter-cpp
+tree-sitter-go
+tree-sitter-javascript
+tree-sitter-typescript

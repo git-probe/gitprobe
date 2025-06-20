@@ -33,6 +33,7 @@ class AnalysisService:
     - Python (fully implemented)
     - JavaScript/TypeScript (fully implemented)
     - C/C++ (fully implemented)
+    - Go (fully implemented)
     - Additional languages (extensible)
     """
 
@@ -75,14 +76,18 @@ class AnalysisService:
             structure_result = self._analyze_structure(
                 temp_dir, include_patterns, exclude_patterns
             )
-            logger.info(f"Found {structure_result['summary']['total_files']} files to analyze.")
+            logger.info(
+                f"Found {structure_result['summary']['total_files']} files to analyze."
+            )
 
             # Step 3: Multi-language call graph analysis
             logger.info("Starting call graph analysis...")
             call_graph_result = self._analyze_call_graph(
                 structure_result["file_tree"], temp_dir
             )
-            logger.info(f"Call graph analysis complete. Found {call_graph_result['call_graph']['total_functions']} functions.")
+            logger.info(
+                f"Call graph analysis complete. Found {call_graph_result['call_graph']['total_functions']} functions."
+            )
 
             # Step 3.5: Read README file
             readme_content = self._read_readme_file(temp_dir)
@@ -107,7 +112,7 @@ class AnalysisService:
                     ],
                 },
                 visualization=call_graph_result["visualization"],
-                readme_content=readme_content
+                readme_content=readme_content,
             )
 
             # Step 5: Cleanup
@@ -122,7 +127,7 @@ class AnalysisService:
         except Exception as e:
             logger.error(f"Analysis failed: {str(e)}", exc_info=True)
             # Ensure cleanup happens even on failure
-            if 'temp_dir' in locals() and Path(temp_dir).exists():
+            if "temp_dir" in locals() and Path(temp_dir).exists():
                 self._cleanup_repository(temp_dir)
             raise RuntimeError(f"Repository analysis failed: {str(e)}")
 
@@ -199,7 +204,9 @@ class AnalysisService:
         exclude_patterns: Optional[List[str]],
     ) -> Dict[str, Any]:
         """Analyze repository file structure with filtering."""
-        logger.info(f"Initializing RepoAnalyzer with include: {include_patterns}, exclude: {exclude_patterns}")
+        logger.info(
+            f"Initializing RepoAnalyzer with include: {include_patterns}, exclude: {exclude_patterns}"
+        )
         repo_analyzer = RepoAnalyzer(include_patterns, exclude_patterns)
         return repo_analyzer.analyze_repository_structure(repo_dir)
 
@@ -231,12 +238,14 @@ class AnalysisService:
         """
         logger.info("Extracting code files from file tree...")
         code_files = self.call_graph_analyzer.extract_code_files(file_tree)
-        
+
         # Filter by supported languages (will expand as we add JS/TS support)
-        logger.info(f"Found {len(code_files)} total code files. Filtering for supported languages.")
+        logger.info(
+            f"Found {len(code_files)} total code files. Filtering for supported languages."
+        )
         supported_files = self._filter_supported_languages(code_files)
         logger.info(f"Analyzing {len(supported_files)} supported files.")
-        
+
         # Perform multi-language analysis
         result = self.call_graph_analyzer.analyze_code_files(supported_files, repo_dir)
 
@@ -252,9 +261,9 @@ class AnalysisService:
         """
         Filter code files to only include supported languages.
 
-        Supports Python, JavaScript, TypeScript, C, and C++.
+        Supports Python, JavaScript, TypeScript, C, C++, and Go.
         """
-        supported_languages = {"python", "javascript", "typescript", "c", "cpp"}
+        supported_languages = {"python", "javascript", "typescript", "c", "cpp", "go"}
 
         return [
             file_info
@@ -264,7 +273,7 @@ class AnalysisService:
 
     def _get_supported_languages(self) -> List[str]:
         """Get list of currently supported languages for analysis."""
-        return ["python", "javascript", "typescript", "c", "cpp"]
+        return ["python", "javascript", "typescript", "c", "cpp", "go"]
 
     def _cleanup_repository(self, temp_dir: str):
         """Clean up cloned repository."""

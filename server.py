@@ -42,7 +42,9 @@ async def analyze_repo(request: AnalyzeRequest):
 
     Supports multiple programming languages:
     - Python (fully supported)
-    - JavaScript/TypeScript (coming soon)
+    - JavaScript/TypeScript (fully supported)
+    - C/C++ (fully supported)
+    - Go (fully supported)
 
     The analysis service handles all orchestration including:
     - Repository cloning and cleanup

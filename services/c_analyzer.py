@@ -1,610 +1,292 @@
 """
-C/C++ AST Analyzer
+C/C++ AST Analyzer using Tree-sitter
 
-Placeholder for C/C++ AST analysis functionality.
-This will be integrated into the AnalysisService to support multi-language analysis.
+This module uses the tree-sitter library to parse C and C++ source code
+and build an Abstract Syntax Tree (AST). It then traverses the AST
+to identify function definitions and call relationships, providing a more
+accurate and robust analysis than regex-based approaches.
+
+**A Note on Installation:**
+The `tree-sitter` Python bindings for C and C++ require a C++ compiler
+to be available on the system during installation to build the language
+parsers. If you encounter errors during installation or at runtime, please
+ensure you have a working C++ compiler (e.g., MSVC on Windows, GCC on Linux).
+
+On Windows, you may need to install the "Desktop development with C++" workload
+from the Visual Studio Installer.
+
+If you continue to face issues, a forced reinstall from source may be necessary:
+`pip install tree-sitter-c tree-sitter-cpp --no-binary :all: --no-cache-dir`
 """
 
-import re
-from typing import List
+import logging
+from typing import List, Tuple, Dict, Any, Optional
 from models.core import Function, CallRelationship
 
+# Configure logging
+logger = logging.getLogger(__name__)
 
-class CASTAnalyzer:
-    """
-    AST analyzer for C files.
+# --- Tree-sitter Language Setup ---
+# Attempt to load the C and C++ languages.
+# These libraries are expected to be in the environment.
+try:
+    from tree_sitter import Language, Parser, Node
+    from tree_sitter_c import C_LANGUAGE
+    from tree_sitter_cpp import CPP_LANGUAGE
 
-    NOTE:
-    -------
-    A production-ready call-graph extractor should ideally leverage a full
-    C parser (e.g. pycparser, clang, tree-sitter-c, etc.).
-    For the purposes of this project we want **good-enough** heuristics that
-    work without any native add-ons or external processes so that the test
-    suite can run in any environment – including CI systems that may not have
-    a C tool-chain.
-
-    Therefore the implementation below uses **regular-expression based
-    heuristics** to:
-    1. Locate function definitions (function declarations and definitions).
-    2. Create `Function` model instances with reasonable metadata (name, file
-       path, start/end lines, etc.).
-    3. Perform a second pass to discover potential function calls inside the
-       detected functions and create `CallRelationship` instances.
-
-    While not 100% accurate, these heuristics are sufficient for small / well
-    structured repositories and satisfy the expectations of the accompanying
-    tests until a more sophisticated parser is introduced.
-    """
-
-    # C keywords that should NOT be treated as functions
-    C_KEYWORDS = {
-        "if",
-        "else",
-        "for",
-        "while",
-        "do",
-        "switch",
-        "case",
-        "default",
-        "break",
-        "continue",
-        "return",
-        "goto",
-        "typedef",
-        "struct",
-        "union",
-        "enum",
-        "const",
-        "volatile",
-        "static",
-        "extern",
-        "auto",
-        "register",
-        "inline",
-        "restrict",
-        "sizeof",
-        "void",
-        "char",
-        "short",
-        "int",
-        "long",
-        "float",
-        "double",
-        "signed",
-        "unsigned",
-        "bool",
-        "_Bool",
-        "_Complex",
-        "_Imaginary",
-    }
-
-    # Function definition pattern: return_type function_name(parameters) {
-    # Matches: int main(int argc, char *argv[]) {
-    #          static void helper_function(void) {
-    #          char* get_string(const char* input) {
-    FUNCTION_DEF_RE = re.compile(
-        r"^\s*(?:(?:static|extern|inline)\s+)?(?:const\s+)?(?:unsigned\s+)?(?:struct\s+\w+\s*\*?|union\s+\w+\s*\*?|enum\s+\w+\s*\*?|\w+\s*\*?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*\{",
-        re.MULTILINE,
+    TREE_SITTER_AVAILABLE = True
+    logger.info("Successfully loaded tree-sitter C and C++ languages.")
+except (ImportError, ModuleNotFoundError):
+    logger.warning(
+        "Tree-sitter C/C++ languages not found. Fallback unavailable for C/C++. "
+        "Please install them and ensure a C++ compiler is available."
     )
+    TREE_SITTER_AVAILABLE = False
+except Exception as e:
+    logger.error(
+        f"An unexpected error occurred while loading tree-sitter languages: {e}",
+        exc_info=True,
+    )
+    TREE_SITTER_AVAILABLE = False
 
-    # Function call pattern: function_name(
-    CALL_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
-    def __init__(self, file_path: str, content: str):
-        self.file_path = file_path
-        self.content = content
-        self.functions: List[Function] = []
-        self.call_relationships: List[CallRelationship] = []
+if TREE_SITTER_AVAILABLE:
 
-    def analyze(self):
-        """Parse the C file and populate ``self.functions`` and
-        ``self.call_relationships`` using regex-based heuristics.
+    class TreeSitterCAnalyzer:
         """
-        self.functions = []
-        self.call_relationships = []
+        AST analyzer for C and C++ files using tree-sitter.
+        """
 
-        # First pass – discover function definitions
-        self._discover_functions()
+        def __init__(self, file_path: str, content: str, language: str):
+            """
+            Initialize the analyzer with the file content and language.
+            """
+            if language not in ["c", "cpp"]:
+                raise ValueError("Language must be 'c' or 'cpp'")
 
-        # Second pass – discover call relationships inside the known functions
-        self._discover_calls()
+            self.file_path = file_path
+            self.content = content
+            self.language = language
+            self.tree: Optional[Node] = None
+            self.functions: List[Function] = []
+            self.call_relationships: List[CallRelationship] = []
 
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
+            # Initialize parser for the specified language
+            lang = C_LANGUAGE if language == "c" else CPP_LANGUAGE
+            self.parser = Parser()
+            self.parser.set_language(lang)
 
-    def _discover_functions(self):
-        """Locate function definitions."""
-        lines = self.content.split("\n")
-
-        for match in self.FUNCTION_DEF_RE.finditer(self.content):
-            name = match.group(1)
-
-            # Skip C keywords
-            if name in self.C_KEYWORDS:
-                continue
-
-            # Find the line number
-            line_start = self.content[: match.start()].count("\n") + 1
-
-            # Extract parameters from the match
-            func_line = match.group(0)
-            params_match = re.search(r"\(([^)]*)\)", func_line)
-            params = []
-            if params_match:
-                param_str = params_match.group(1).strip()
-                if param_str and param_str != "void":
-                    # Simple parameter parsing - extract parameter names
-                    param_parts = [p.strip() for p in param_str.split(",")]
-                    for param in param_parts:
-                        # Extract just the parameter name (last word)
-                        param_words = param.split()
-                        if param_words:
-                            # Handle pointer parameters like "char *name" or "int* count"
-                            param_name = param_words[-1].lstrip("*")
-                            if param_name and not param_name in self.C_KEYWORDS:
-                                params.append(param_name)
-
-            # Find the end of the function by matching braces
-            start_pos = match.end()
-            brace_count = 1
-            end_pos = start_pos
-
-            while end_pos < len(self.content) and brace_count > 0:
-                if self.content[end_pos] == "{":
-                    brace_count += 1
-                elif self.content[end_pos] == "}":
-                    brace_count -= 1
-                end_pos += 1
-
-            line_end = self.content[:end_pos].count("\n") + 1
-
-            # Extract code snippet
-            code_snippet = "\n".join(lines[line_start - 1 : line_end])
-
-            func = Function(
-                name=name,
-                file_path=self.file_path,
-                line_start=line_start,
-                line_end=line_end,
-                parameters=params,
-                docstring=None,
-                is_method=False,
-                class_name=None,
-                code_snippet=code_snippet,
+        def analyze(self):
+            """
+            Parse the source code and extract functions and call relationships.
+            """
+            logger.info(f"Starting tree-sitter analysis for {self.file_path}")
+            self.tree = self.parser.parse(bytes(self.content, "utf8"))
+            self._discover_functions()
+            self._discover_calls()
+            logger.info(
+                f"Tree-sitter analysis complete: Found {len(self.functions)} functions and {len(self.call_relationships)} calls."
             )
-            self.functions.append(func)
 
-        # Preserve order for later mapping
-        self.functions.sort(key=lambda f: f.line_start)
+        def _discover_functions(self):
+            """
+            Locate function definitions using a tree-sitter query.
+            """
+            assert (
+                self.tree is not None
+            ), "Tree must be parsed before discovering functions."
 
-    def _discover_calls(self):
-        """Locate function calls within each discovered function."""
-        if not self.functions:
-            return
+            query_code = """
+            (function_definition
+              declarator: (function_declarator
+                declarator: [
+                  (identifier) @function_name
+                  (pointer_declarator declarator: (identifier) @function_name)
+                  (reference_declarator declarator: (identifier) @function_name)
+                ]
+                parameters: (parameter_list) @params
+              )
+              body: (compound_statement) @body
+            )
+            """
 
-        lines = self.content.split("\n")
+            if self.language == "cpp":
+                query_code += """
+                (declaration
+                  (function_definition
+                    declarator: (function_declarator
+                      declarator: [
+                        (field_identifier) @function_name
+                        (qualified_identifier name: (identifier) @function_name)
+                      ]
+                      parameters: (parameter_list) @params
+                    )
+                  )
+                )
+                (constructor_or_destructor_definition
+                    declarator: [
+                        (qualified_identifier) @function_name
+                        (destructor_name) @function_name
+                    ]
+                    parameters: (parameter_list) @params
+                    body: (compound_statement) @body
+                )
+                """
 
-        # C standard library functions to skip
-        C_BUILTINS = {
-            "printf",
-            "fprintf",
-            "sprintf",
-            "snprintf",
-            "scanf",
-            "fscanf",
-            "sscanf",
-            "malloc",
-            "calloc",
-            "realloc",
-            "free",
-            "alloca",
-            "strlen",
-            "strcpy",
-            "strncpy",
-            "strcat",
-            "strncat",
-            "strcmp",
-            "strncmp",
-            "strchr",
-            "strrchr",
-            "strstr",
-            "strtok",
-            "strtol",
-            "strtod",
-            "atoi",
-            "atof",
-            "memcpy",
-            "memmove",
-            "memset",
-            "memcmp",
-            "memchr",
-            "fopen",
-            "fclose",
-            "fread",
-            "fwrite",
-            "fseek",
-            "ftell",
-            "rewind",
-            "fflush",
-            "getchar",
-            "putchar",
-            "gets",
-            "puts",
-            "fgets",
-            "fputs",
-            "abs",
-            "labs",
-            "fabs",
-            "ceil",
-            "floor",
-            "sqrt",
-            "pow",
-            "sin",
-            "cos",
-            "tan",
-            "exit",
-            "abort",
-            "atexit",
-            "system",
-            "getenv",
-            "rand",
-            "srand",
-            "time",
-            "sizeof",
-            "offsetof",
-            "va_start",
-            "va_end",
-            "va_arg",
-        }
+            lang = C_LANGUAGE if self.language == "c" else CPP_LANGUAGE
+            query = lang.query(query_code)
+            captures = query.captures(self.tree.root_node)
 
-        for func in self.functions:
-            caller_id = f"{self.file_path}:{func.name}"
+            func_nodes: Dict[str, Dict[str, Any]] = {}
+            for node, capture_name in captures:
+                if capture_name == "function_name":
+                    func_name = node.text.decode("utf8")
+                    unique_key = f"{func_name}_{node.start_point[0]}"
+                    if unique_key not in func_nodes:
+                        func_nodes[unique_key] = {}
+                    func_nodes[unique_key]["node"] = node
+                    func_nodes[unique_key]["name"] = func_name
+                elif capture_name == "params":
+                    if func_nodes:
+                        last_key = list(func_nodes.keys())[-1]
+                        func_nodes[last_key]["params_node"] = node
+                elif capture_name == "body":
+                    if func_nodes:
+                        last_key = list(func_nodes.keys())[-1]
+                        func_nodes[last_key]["body_node"] = node
 
-            # Look for calls within this function's line range
-            end_line = func.line_end or func.line_start
-            for line_num in range(func.line_start, end_line + 1):
-                if line_num <= len(lines):
-                    line = lines[line_num - 1]
+            for key, data in func_nodes.items():
+                if "node" not in data or "body_node" not in data:
+                    continue
 
-                    for call_match in self.CALL_RE.finditer(line):
-                        callee = call_match.group(1)
+                func_node = data["node"]
+                body_node = data["body_node"]
+                params_node = data.get("params_node")
+                definition_node = func_node
+                while (
+                    definition_node.parent
+                    and definition_node.type != "function_definition"
+                ):
+                    definition_node = definition_node.parent
 
-                        # Skip built-ins and keywords
-                        if callee in C_BUILTINS or callee in self.C_KEYWORDS:
-                            continue
+                params = self._extract_parameters(params_node) if params_node else []
+                code_snippet = self._get_node_text(definition_node)
 
-                        # Don't create self-calls
-                        if callee == func.name:
-                            continue
+                func = Function(
+                    name=data["name"],
+                    file_path=self.file_path,
+                    line_start=definition_node.start_point[0] + 1,
+                    line_end=definition_node.end_point[0] + 1,
+                    parameters=params,
+                    code_snippet=code_snippet,
+                    is_method=self._is_method(func_node),
+                )
+                self.functions.append(func)
 
-                        relationship = CallRelationship(
-                            caller=caller_id,
-                            callee=callee,
-                            call_line=line_num,
-                            is_resolved=False,
-                        )
-                        self.call_relationships.append(relationship)
+            self.functions.sort(key=lambda f: f.line_start)
+
+        def _is_method(self, node: Node) -> bool:
+            if self.language == "cpp":
+                current = node.parent
+                while current:
+                    if current.type in ["class_specifier", "struct_specifier"]:
+                        return True
+                    current = current.parent
+            return False
+
+        def _get_node_text(self, node: Node) -> str:
+            return self.content.encode("utf8")[node.start_byte : node.end_byte].decode(
+                "utf8"
+            )
+
+        def _extract_parameters(self, params_node: Node) -> List[str]:
+            params = []
+            param_query_code = """
+            (parameter_declaration
+              declarator: [
+                (identifier) @param_name
+                (pointer_declarator) @param_name
+                (reference_declarator) @param_name
+              ]
+            )
+            """
+            lang = C_LANGUAGE if self.language == "c" else CPP_LANGUAGE
+            param_query = lang.query(param_query_code)
+            for node, capture_name in param_query.captures(params_node):
+                param_name_node = node
+                if node.type == "pointer_declarator":
+                    child = node.child_by_field_name("declarator")
+                    if child and child.type == "identifier":
+                        param_name_node = child
+                elif node.type == "reference_declarator":
+                    child = node.child_by_field_name("declarator")
+                    if child and child.type == "identifier":
+                        param_name_node = child
+                params.append(param_name_node.text.decode("utf8"))
+            return params
+
+        def _discover_calls(self):
+            assert (
+                self.tree is not None
+            ), "Tree must be parsed before discovering calls."
+            query_code = """
+            (call_expression
+              function: [
+                (identifier) @call_name
+                (field_expression field: (field_identifier) @call_name)
+                (qualified_identifier name: (identifier) @call_name)
+              ]
+            )
+            """
+            lang = C_LANGUAGE if self.language == "c" else CPP_LANGUAGE
+            query = lang.query(query_code)
+            captures = query.captures(self.tree.root_node)
+
+            for node, _ in captures:
+                callee_name = node.text.decode("utf8")
+                call_line = node.start_point[0] + 1
+
+                caller_func = self._find_containing_function(call_line)
+                if caller_func:
+                    if callee_name == caller_func.name:
+                        continue
+                    relationship = CallRelationship(
+                        caller=f"{self.file_path}:{caller_func.name}",
+                        callee=callee_name,
+                        call_line=call_line,
+                        is_resolved=False,
+                    )
+                    self.call_relationships.append(relationship)
+
+        def _find_containing_function(self, line_number: int) -> Optional[Function]:
+            for func in self.functions:
+                if func.line_start is not None and func.line_end is not None:
+                    if func.line_start <= line_number <= func.line_end:
+                        return func
+            return None
 
 
-class CppASTAnalyzer(CASTAnalyzer):
+def _analyze_file(
+    file_path: str, content: str, language: str
+) -> Tuple[List[Function], List[CallRelationship]]:
     """
-    AST analyzer for C++ files.
-
-    TODO: Implement using C++ AST parser like:
-    - clang (via subprocess)
-    - tree-sitter-cpp
-    - or a Python-based C++ parser
+    Generic analysis function for C or C++ files.
     """
-
-    # C++ keywords in addition to C keywords
-    CPP_KEYWORDS = {
-        # C++ specific keywords
-        "class",
-        "struct",
-        "public",
-        "private",
-        "protected",
-        "virtual",
-        "override",
-        "namespace",
-        "using",
-        "template",
-        "typename",
-        "this",
-        "new",
-        "delete",
-        "try",
-        "catch",
-        "throw",
-        "friend",
-        "operator",
-        "explicit",
-        "mutable",
-        "constexpr",
-        "decltype",
-        "nullptr",
-        "auto",
-        "final",
-        "noexcept",
-        "thread_local",
-        "alignas",
-        "alignof",
-        "static_assert",
-        "concept",
-        "requires",
-        # STL and common C++ patterns
-        "std",
-        "vector",
-        "string",
-        "map",
-        "set",
-        "list",
-        "deque",
-        "stack",
-        "queue",
-        "pair",
-        "tuple",
-        "shared_ptr",
-        "unique_ptr",
-        "weak_ptr",
-        "make_shared",
-        "make_unique",
-    }
-
-    # C++ function definition patterns
-    CPP_FUNCTION_DEF_RE = re.compile(
-        r"^\s*(?:(?:static|extern|inline|virtual|explicit|constexpr)\s+)*(?:const\s+)?(?:unsigned\s+)?(?:template\s*<[^>]*>\s+)?(?:[\w:]+\s*<?[^>]*>?\s*\*?\s*&?\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*(?:const\s+)?(?:override\s+)?(?:final\s+)?\{",
-        re.MULTILINE,
-    )
-
-    # C++ method definition pattern (inside class)
-    CPP_METHOD_DEF_RE = re.compile(
-        r"^\s*(?:(?:static|virtual|explicit|constexpr)\s+)*(?:const\s+)?(?:unsigned\s+)?(?:[\w:]+\s*<?[^>]*>?\s*\*?\s*&?\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*(?:const\s+)?(?:override\s+)?(?:final\s+)?(?:\s*:\s*[^{]*)?(?:\{|;)",
-        re.MULTILINE,
-    )
-
-    def __init__(self, file_path: str, content: str):
-        super().__init__(file_path, content)
-        # Combine C and C++ keywords
-        self.ALL_KEYWORDS = self.C_KEYWORDS | self.CPP_KEYWORDS
-
-    def _discover_functions(self):
-        """Locate C++ function and method definitions."""
-        lines = self.content.split("\n")
-
-        # Find regular function definitions
-        for match in self.CPP_FUNCTION_DEF_RE.finditer(self.content):
-            name = match.group(1)
-
-            # Skip keywords and operators
-            if name in self.ALL_KEYWORDS or name.startswith("operator"):
-                continue
-
-            self._create_function_from_match(match, name, lines, is_method=False)
-
-        # Find method definitions (simpler pattern)
-        for match in self.CPP_METHOD_DEF_RE.finditer(self.content):
-            name = match.group(1)
-
-            # Skip keywords, operators, and constructors/destructors
-            if (
-                name in self.ALL_KEYWORDS
-                or name.startswith("operator")
-                or name.startswith("~")
-            ):
-                continue
-
-            self._create_function_from_match(match, name, lines, is_method=True)
-
-        # Remove duplicates and sort
-        seen = set()
-        unique_functions = []
-        for func in self.functions:
-            key = (func.name, func.line_start)
-            if key not in seen:
-                seen.add(key)
-                unique_functions.append(func)
-
-        self.functions = sorted(unique_functions, key=lambda f: f.line_start)
-
-    def _create_function_from_match(self, match, name, lines, is_method=False):
-        """Helper to create Function object from regex match."""
-        line_start = self.content[: match.start()].count("\n") + 1
-
-        # Extract parameters
-        func_line = match.group(0)
-        params_match = re.search(r"\(([^)]*)\)", func_line)
-        params = []
-        if params_match:
-            param_str = params_match.group(1).strip()
-            if param_str and param_str != "void":
-                # Simple parameter parsing for C++
-                param_parts = [p.strip() for p in param_str.split(",")]
-                for param in param_parts:
-                    # Extract parameter name (handle C++ references and pointers)
-                    param_words = param.split()
-                    if param_words:
-                        param_name = param_words[-1].lstrip("*&")
-                        if param_name and param_name not in self.ALL_KEYWORDS:
-                            params.append(param_name)
-
-        # Find function end
-        if match.group(0).rstrip().endswith(";"):
-            # Declaration only
-            line_end = line_start
-        else:
-            # Definition with body
-            start_pos = match.end()
-            brace_count = 1
-            end_pos = start_pos
-
-            while end_pos < len(self.content) and brace_count > 0:
-                if self.content[end_pos] == "{":
-                    brace_count += 1
-                elif self.content[end_pos] == "}":
-                    brace_count -= 1
-                end_pos += 1
-
-            line_end = self.content[:end_pos].count("\n") + 1
-
-        # Extract code snippet
-        code_snippet = "\n".join(lines[line_start - 1 : line_end])
-
-        func = Function(
-            name=name,
-            file_path=self.file_path,
-            line_start=line_start,
-            line_end=line_end,
-            parameters=params,
-            docstring=None,
-            is_method=is_method,
-            class_name=None,  # TODO: Extract class context
-            code_snippet=code_snippet,
+    if not TREE_SITTER_AVAILABLE:
+        logger.error(
+            f"Tree-sitter is not available. Skipping analysis for {file_path}. See install notes in c_analyzer.py."
         )
-        self.functions.append(func)
+        return [], []
 
-    def _discover_calls(self):
-        """Locate function calls within each discovered function."""
-        if not self.functions:
-            return
-
-        lines = self.content.split("\n")
-
-        # C++ standard library functions to skip
-        CPP_BUILTINS = {
-            # C standard library
-            "printf",
-            "fprintf",
-            "sprintf",
-            "snprintf",
-            "scanf",
-            "fscanf",
-            "sscanf",
-            "malloc",
-            "calloc",
-            "realloc",
-            "free",
-            "strlen",
-            "strcpy",
-            "strncpy",
-            "strcat",
-            "strncat",
-            "strcmp",
-            "strncmp",
-            "strchr",
-            "strrchr",
-            "strstr",
-            "strtok",
-            "strtol",
-            "strtod",
-            "atoi",
-            "atof",
-            "memcpy",
-            "memmove",
-            "memset",
-            "memcmp",
-            "memchr",
-            "fopen",
-            "fclose",
-            "fread",
-            "fwrite",
-            "fseek",
-            "ftell",
-            "rewind",
-            "fflush",
-            "getchar",
-            "putchar",
-            "gets",
-            "puts",
-            "fgets",
-            "fputs",
-            "abs",
-            "labs",
-            "fabs",
-            "ceil",
-            "floor",
-            "sqrt",
-            "pow",
-            "sin",
-            "cos",
-            "tan",
-            "exit",
-            "abort",
-            "atexit",
-            "system",
-            "getenv",
-            "rand",
-            "srand",
-            "time",
-            # C++ standard library
-            "cout",
-            "cin",
-            "cerr",
-            "endl",
-            "flush",
-            "setw",
-            "setprecision",
-            "push_back",
-            "pop_back",
-            "push_front",
-            "pop_front",
-            "insert",
-            "erase",
-            "find",
-            "begin",
-            "end",
-            "size",
-            "empty",
-            "clear",
-            "resize",
-            "reserve",
-            "make_pair",
-            "make_tuple",
-            "get",
-            "swap",
-            "sort",
-            "reverse",
-            "unique",
-            "min",
-            "max",
-            "accumulate",
-            "transform",
-            "for_each",
-            "count",
-            "find_if",
-        }
-
-        for func in self.functions:
-            caller_id = f"{self.file_path}:{func.name}"
-
-            # Look for calls within this function's line range
-            end_line = func.line_end or func.line_start
-            for line_num in range(func.line_start, end_line + 1):
-                if line_num <= len(lines):
-                    line = lines[line_num - 1]
-
-                    for call_match in self.CALL_RE.finditer(line):
-                        callee = call_match.group(1)
-
-                        # Skip built-ins and keywords
-                        if callee in CPP_BUILTINS or callee in self.ALL_KEYWORDS:
-                            continue
-
-                        # Don't create self-calls
-                        if callee == func.name:
-                            continue
-
-                        relationship = CallRelationship(
-                            caller=caller_id,
-                            callee=callee,
-                            call_line=line_num,
-                            is_resolved=False,
-                        )
-                        self.call_relationships.append(relationship)
-
-
-# Helper functions to integrate C/C++ analyzers into CallGraphAnalyzer
+    try:
+        analyzer = TreeSitterCAnalyzer(file_path, content, language)
+        analyzer.analyze()
+        return analyzer.functions, analyzer.call_relationships
+    except Exception as e:
+        logger.error(
+            f"Failed to analyze {file_path} with tree-sitter: {e}", exc_info=True
+        )
+        return [], []
 
 
 def analyze_c_file(
@@ -612,12 +294,8 @@ def analyze_c_file(
 ) -> tuple[List[Function], List[CallRelationship]]:
     """
     Analyze a C file and return functions and relationships.
-
-    This function is called by CallGraphAnalyzer._analyze_c_file()
     """
-    analyzer = CASTAnalyzer(file_path, content)
-    analyzer.analyze()
-    return analyzer.functions, analyzer.call_relationships
+    return _analyze_file(file_path, content, "c")
 
 
 def analyze_cpp_file(
@@ -625,9 +303,5 @@ def analyze_cpp_file(
 ) -> tuple[List[Function], List[CallRelationship]]:
     """
     Analyze a C++ file and return functions and relationships.
-
-    This function is called by CallGraphAnalyzer._analyze_cpp_file()
     """
-    analyzer = CppASTAnalyzer(file_path, content)
-    analyzer.analyze()
-    return analyzer.functions, analyzer.call_relationships
+    return _analyze_file(file_path, content, "cpp")
