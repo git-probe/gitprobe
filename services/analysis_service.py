@@ -15,7 +15,6 @@ from .call_graph_analyzer import CallGraphAnalyzer
 from .cloning import clone_repository, cleanup_repository, parse_github_url
 from models.analysis import AnalysisResult
 from models.core import Repository
-from utils.logging_config import logger
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +203,7 @@ class AnalysisService:
                 try:
                     return readme_path.read_text(encoding="utf-8")
                 except Exception as e:
-                    logger.warning(f"Could not read README file at {readme_path}: {e}")
+                    print(f"Warning: Could not read README file at {readme_path}: {e}")
                     return None
         return None
 
