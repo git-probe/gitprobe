@@ -21,8 +21,10 @@ class CallGraphAnalyzer:
 
     Supported languages:
     - Python (fully supported)
-    - JavaScript (planned)
-    - TypeScript (planned)
+    - JavaScript (fully supported)
+    - TypeScript (fully supported)
+    - C (fully supported)
+    - C++ (fully supported)
     """
 
     def __init__(self):
@@ -131,6 +133,10 @@ class CallGraphAnalyzer:
                 self._analyze_javascript_file(file_info["path"], content)
             elif file_info["language"] == "typescript":
                 self._analyze_typescript_file(file_info["path"], content)
+            elif file_info["language"] == "c":
+                self._analyze_c_file(file_info["path"], content)
+            elif file_info["language"] == "cpp":
+                self._analyze_cpp_file(file_info["path"], content)
             else:
                 print(
                     f"⚠️ Unsupported language: {file_info['language']} for {file_info['path']}"
@@ -190,6 +196,46 @@ class CallGraphAnalyzer:
         from .js_analyzer import analyze_typescript_file
 
         functions, relationships = analyze_typescript_file(file_path, content)
+
+        # Store functions with unique identifiers
+        for func in functions:
+            func_id = f"{file_path}:{func.name}"
+            self.functions[func_id] = func
+
+        # Store call relationships
+        self.call_relationships.extend(relationships)
+
+    def _analyze_c_file(self, file_path: str, content: str):
+        """
+        Analyze C file using C AST analyzer.
+
+        Args:
+            file_path: Relative path to the C file
+            content: File content string
+        """
+        from .c_analyzer import analyze_c_file
+
+        functions, relationships = analyze_c_file(file_path, content)
+
+        # Store functions with unique identifiers
+        for func in functions:
+            func_id = f"{file_path}:{func.name}"
+            self.functions[func_id] = func
+
+        # Store call relationships
+        self.call_relationships.extend(relationships)
+
+    def _analyze_cpp_file(self, file_path: str, content: str):
+        """
+        Analyze C++ file using C++ AST analyzer.
+
+        Args:
+            file_path: Relative path to the C++ file
+            content: File content string
+        """
+        from .c_analyzer import analyze_cpp_file
+
+        functions, relationships = analyze_cpp_file(file_path, content)
 
         # Store functions with unique identifiers
         for func in functions:
@@ -273,6 +319,10 @@ class CallGraphAnalyzer:
                 node_classes.append("lang-javascript")
             elif file_ext == ".ts":
                 node_classes.append("lang-typescript")
+            elif file_ext in [".c", ".h"]:
+                node_classes.append("lang-c")
+            elif file_ext in [".cpp", ".cc", ".cxx", ".hpp", ".hxx"]:
+                node_classes.append("lang-cpp")
 
             cytoscape_elements.append(
                 {
