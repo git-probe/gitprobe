@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from .core import Function, CallRelationship, Repository
 
 
@@ -12,6 +12,7 @@ class AnalysisResult(BaseModel):
     file_tree: Dict[str, Any]
     summary: Dict[str, Any]
     visualization: Dict[str, Any] = {}
+    readme_content: Optional[str] = None
 
 
 class NodeSelection(BaseModel):

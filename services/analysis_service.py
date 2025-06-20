@@ -8,12 +8,14 @@ AST parsing for call graph generation.
 
 import logging
 from typing import Dict, List, Optional, Any
+from pathlib import Path
 
 from .repo_analyzer import RepoAnalyzer
 from .call_graph_analyzer import CallGraphAnalyzer
 from .cloning import clone_repository, cleanup_repository, parse_github_url
 from models.analysis import AnalysisResult
 from models.core import Repository
+from utils.logging_config import logger
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +81,9 @@ class AnalysisService:
                 structure_result["file_tree"], temp_dir
             )
 
+            # Step 3.5: Read README file
+            readme_content = self._read_readme_file(temp_dir)
+
             # Step 4: Build comprehensive result
             analysis_result = AnalysisResult(
                 repository=Repository(
@@ -99,6 +104,7 @@ class AnalysisService:
                     ],
                 },
                 visualization=call_graph_result["visualization"],
+                readme_content=readme_content
             )
 
             # Step 5: Cleanup
@@ -188,6 +194,19 @@ class AnalysisService:
         """Analyze repository file structure with filtering."""
         repo_analyzer = RepoAnalyzer(include_patterns, exclude_patterns)
         return repo_analyzer.analyze_repository_structure(repo_dir)
+
+    def _read_readme_file(self, repo_dir: str) -> Optional[str]:
+        """Find and read the README file from the repository root."""
+        possible_readme_names = ["README.md", "README", "readme.md", "README.txt"]
+        for name in possible_readme_names:
+            readme_path = Path(repo_dir) / name
+            if readme_path.exists():
+                try:
+                    return readme_path.read_text(encoding="utf-8")
+                except Exception as e:
+                    logger.warning(f"Could not read README file at {readme_path}: {e}")
+                    return None
+        return None
 
     def _analyze_call_graph(
         self, file_tree: Dict[str, Any], repo_dir: str
