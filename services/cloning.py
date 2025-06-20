@@ -9,6 +9,8 @@ import tempfile
 import subprocess
 from typing import Optional
 
+GIT_EXECUTABLE_PATH = shutil.which("git")
+
 
 def clone_repository(github_url: str) -> str:
     """
@@ -21,13 +23,18 @@ def clone_repository(github_url: str) -> str:
         str: Path to the cloned repository directory
 
     Raises:
-        RuntimeError: If cloning fails
+        RuntimeError: If cloning fails or git executable is not found.
     """
+    if not GIT_EXECUTABLE_PATH:
+        raise RuntimeError(
+            "Git executable not found. Please install Git and ensure it is in the system's PATH."
+        )
+
     temp_dir = tempfile.mkdtemp(prefix="gitprobe_")
 
     try:
         subprocess.run(
-            ["git", "clone", "--depth", "1", github_url, temp_dir],
+            [GIT_EXECUTABLE_PATH, "clone", "--depth", "1", github_url, temp_dir],
             check=True,
             capture_output=True,
             text=True,
@@ -38,6 +45,14 @@ def clone_repository(github_url: str) -> str:
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)
         raise RuntimeError(f"Failed to clone repository: {e.stderr}")
+    except FileNotFoundError:
+        # This is a fallback, but shutil.which should prevent this.
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir)
+        raise RuntimeError(
+            f"Git executable not found at '{GIT_EXECUTABLE_PATH}'. "
+            "Please ensure Git is installed and the path is correct."
+        )
 
 
 def cleanup_repository(repo_dir: str) -> bool:
