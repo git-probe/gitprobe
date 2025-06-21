@@ -12,3 +12,6 @@ tree-sitter-go
 tree-sitter-javascript
 tree-sitter-typescript
 tree-sitter-rust==0.21.2
+# C/C++ parsing alternatives
+pycparser>=2.22
+clang>=20.0.0
