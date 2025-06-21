@@ -34,6 +34,7 @@ class AnalysisService:
     - JavaScript/TypeScript (fully implemented)
     - C/C++ (fully implemented)
     - Go (fully implemented)
+    - Rust (fully implemented)
     - Additional languages (extensible)
     """
 
@@ -261,9 +262,17 @@ class AnalysisService:
         """
         Filter code files to only include supported languages.
 
-        Supports Python, JavaScript, TypeScript, C, C++, and Go.
+        Supports Python, JavaScript, TypeScript, C, C++, Go, and Rust.
         """
-        supported_languages = {"python", "javascript", "typescript", "c", "cpp", "go"}
+        supported_languages = {
+            "python",
+            "javascript",
+            "typescript",
+            "c",
+            "cpp",
+            "go",
+            "rust",
+        }
 
         return [
             file_info
@@ -273,7 +282,7 @@ class AnalysisService:
 
     def _get_supported_languages(self) -> List[str]:
         """Get list of currently supported languages for analysis."""
-        return ["python", "javascript", "typescript", "c", "cpp", "go"]
+        return ["python", "javascript", "typescript", "c", "cpp", "go", "rust"]
 
     def _cleanup_repository(self, temp_dir: str):
         """Clean up cloned repository."""

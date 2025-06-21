@@ -29,6 +29,7 @@ class CallGraphAnalyzer:
     - C (fully supported with AST parsing)
     - C++ (fully supported with AST parsing)
     - Go (fully supported with tree-sitter AST parsing)
+    - Rust (fully supported with tree-sitter AST parsing)
 
     Key improvements:
     - JavaScript/TypeScript now use tree-sitter for 99%+ accuracy
@@ -161,6 +162,8 @@ class CallGraphAnalyzer:
                 self._analyze_cpp_file(file_path, content)
             elif language == "go":
                 self._analyze_go_file(file_path, content)
+            elif language == "rust":
+                self._analyze_rust_file(file_path, content)
             else:
                 logger.warning(
                     f"Unsupported language for call graph analysis: {language} for file {file_path}"
@@ -332,6 +335,32 @@ class CallGraphAnalyzer:
             self.call_relationships.extend(relationships)
         except Exception as e:
             logger.error(f"Failed to analyze Go file {file_path}: {e}", exc_info=True)
+
+    def _analyze_rust_file(self, file_path: str, content: str):
+        """
+        Analyze Rust file using Rust AST analyzer.
+
+        Args:
+            file_path: Relative path to the Rust file
+            content: File content string
+        """
+        from .rust_analyzer import analyze_rust_file_treesitter
+
+        try:
+            functions, relationships = analyze_rust_file_treesitter(file_path, content)
+            logger.info(
+                f"Found {len(functions)} functions and {len(relationships)} relationships in {file_path}"
+            )
+
+            # Store functions with unique identifiers
+            for func in functions:
+                func_id = f"{file_path}:{func.name}"
+                self.functions[func_id] = func
+
+            # Store call relationships
+            self.call_relationships.extend(relationships)
+        except Exception as e:
+            logger.error(f"Failed to analyze Rust file {file_path}: {e}", exc_info=True)
 
     def _resolve_call_relationships(self):
         """

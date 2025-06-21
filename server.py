@@ -40,11 +40,12 @@ async def analyze_repo(request: AnalyzeRequest):
     """
     API endpoint for complete repository analysis including call graphs.
 
-    Supports multiple programming languages:
+        Supports multiple programming languages:
     - Python (fully supported)
     - JavaScript/TypeScript (fully supported)
     - C/C++ (fully supported)
     - Go (fully supported)
+    - Rust (fully supported)
 
     The analysis service handles all orchestration including:
     - Repository cloning and cleanup
