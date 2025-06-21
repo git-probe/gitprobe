@@ -89,6 +89,7 @@ async def analyze_repo(request: FlexibleAnalyzeRequest):
         return AnalysisResponse(status="success", data=analysis_result.model_dump())
 
     except Exception as e:
+        print(f"❌ /analyze Error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
