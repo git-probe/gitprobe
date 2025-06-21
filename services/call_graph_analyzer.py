@@ -215,7 +215,7 @@ class CallGraphAnalyzer:
         try:
             logger.info(f"Starting tree-sitter JavaScript analysis for {file_path}")
             # Use the new tree-sitter based analyzer
-            from .js_analyzer_new import analyze_javascript_file_treesitter
+            from .js_analyzer import analyze_javascript_file_treesitter
 
             logger.info(
                 f"About to call analyze_javascript_file_treesitter with args: file_path='{file_path}', content_length={len(content)}"
@@ -250,7 +250,7 @@ class CallGraphAnalyzer:
         try:
             logger.info(f"Starting tree-sitter TypeScript analysis for {file_path}")
             # Use the new tree-sitter based analyzer
-            from .js_analyzer_new import analyze_typescript_file_treesitter
+            from .js_analyzer import analyze_typescript_file_treesitter
 
             logger.info(
                 f"About to call analyze_typescript_file_treesitter with args: file_path='{file_path}', content_length={len(content)}"

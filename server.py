@@ -4,9 +4,10 @@ Shows how the API layer coordinates the analysis workflow.
 """
 
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, field_validator
 from typing import Optional, List
 from services.analysis_service import AnalysisService
+from services.cloning import sanitize_github_url
 
 app = FastAPI(
     title="GitProbe API",
@@ -19,6 +20,28 @@ class AnalyzeRequest(BaseModel):
     github_url: HttpUrl
     include_patterns: Optional[List[str]] = None
     exclude_patterns: Optional[List[str]] = None
+
+
+class FlexibleAnalyzeRequest(BaseModel):
+    github_url: str
+    include_patterns: Optional[List[str]] = None
+    exclude_patterns: Optional[List[str]] = None
+
+    @field_validator('github_url')
+    @classmethod
+    def sanitize_url(cls, v):
+        """Sanitize and validate GitHub URL"""
+        if not v:
+            raise ValueError("GitHub URL is required")
+        
+        # Use our sanitize function to clean up the URL
+        sanitized = sanitize_github_url(v)
+        
+        # Basic validation that it looks like a GitHub URL
+        if 'github.com' not in sanitized:
+            raise ValueError("Must be a valid GitHub URL")
+            
+        return sanitized
 
 
 class StructureOnlyRequest(BaseModel):
@@ -36,7 +59,7 @@ class ErrorResponse(BaseModel):
 
 
 @app.post("/analyze", response_model=AnalysisResponse)
-async def analyze_repo(request: AnalyzeRequest):
+async def analyze_repo(request: FlexibleAnalyzeRequest):
     """
     API endpoint for complete repository analysis including call graphs.
 
@@ -54,10 +77,12 @@ async def analyze_repo(request: AnalyzeRequest):
     - Call graph generation and visualization
     """
     try:
+        print(f"🔧 /analyze Debug: Received URL: {request.github_url}")
+        
         # Use the centralized analysis service
         analysis_service = AnalysisService()
         analysis_result = analysis_service.analyze_repository_full(
-            str(request.github_url), request.include_patterns, request.exclude_patterns
+            request.github_url, request.include_patterns, request.exclude_patterns
         )
 
         # Convert AnalysisResult to dict for API response
@@ -122,6 +147,35 @@ async def root():
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
+
+
+@app.post("/api/probe", response_model=AnalysisResponse)
+async def probe_repo(request: FlexibleAnalyzeRequest):
+    """
+    API endpoint for repository analysis that accepts flexible URL formats.
+    
+    This endpoint automatically sanitizes GitHub URLs and supports formats like:
+    - github.com/owner/repo
+    - owner/repo  
+    - https://github.com/owner/repo/tree/branch/path
+    
+    Performs complete repository analysis including call graphs.
+    """
+    try:
+        print(f"🔧 API Debug: Received URL: {request.github_url}")
+        
+        # Use the centralized analysis service
+        analysis_service = AnalysisService()
+        analysis_result = analysis_service.analyze_repository_full(
+            request.github_url, request.include_patterns, request.exclude_patterns
+        )
+
+        # Convert AnalysisResult to dict for API response
+        return AnalysisResponse(status="success", data=analysis_result.model_dump())
+
+    except Exception as e:
+        print(f"❌ API Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
 if __name__ == "__main__":

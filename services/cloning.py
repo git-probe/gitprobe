@@ -14,12 +14,70 @@ from typing import Optional
 GIT_EXECUTABLE_PATH = shutil.which("git")
 
 
+def sanitize_github_url(github_url: str) -> str:
+    """
+    Sanitize GitHub URL to ensure proper format and remove extra path components.
+    
+    Args:
+        github_url: Raw GitHub URL or repository path
+        
+    Returns:
+        str: Sanitized GitHub URL suitable for cloning
+    """
+    # Remove leading/trailing whitespace
+    url = github_url.strip()
+    
+    # Remove protocol temporarily for easier parsing
+    protocol = 'https://'
+    if url.startswith('https://'):
+        url = url[8:]  # Remove https://
+    elif url.startswith('http://'):
+        url = url[7:]   # Remove http://
+        protocol = 'http://'
+    
+    # Remove leading www. if present
+    if url.startswith('www.'):
+        url = url[4:]
+    
+    # Handle different formats
+    parts = url.split('/')
+    
+    if url.startswith('github.com/'):
+        # Format: github.com/owner/repo/... or github.com/owner/repo
+        url_parts = url.split('/')
+        if len(url_parts) >= 3:
+            owner = url_parts[1]
+            repo = url_parts[2]
+        else:
+            # Malformed, return original
+            return github_url
+    elif '/' in url and not url.startswith('github.com'):
+        # Format: owner/repo/... or owner/repo
+        url_parts = url.split('/')
+        if len(url_parts) >= 2:
+            owner = url_parts[0]
+            repo = url_parts[1]
+        else:
+            # Malformed, return original 
+            return github_url
+    else:
+        # Single string, assume it's a repo name with no owner
+        return github_url
+    
+    # Remove .git suffix if present
+    if repo.endswith('.git'):
+        repo = repo[:-4]
+    
+    # Construct final URL
+    return f"{protocol}github.com/{owner}/{repo}"
+
+
 def clone_repository(github_url: str) -> str:
     """
     Clone a GitHub repository to a temporary directory.
 
     Args:
-        github_url: GitHub repository URL
+        github_url: GitHub repository URL (will be sanitized automatically)
 
     Returns:
         str: Path to the cloned repository directory
@@ -32,6 +90,9 @@ def clone_repository(github_url: str) -> str:
             "Git executable not found. Please install Git and ensure it is in the system's PATH."
         )
 
+    # Sanitize the GitHub URL
+    sanitized_url = sanitize_github_url(github_url)
+    
     temp_dir = tempfile.mkdtemp(prefix="gitprobe_")
 
     try:
@@ -60,7 +121,7 @@ def clone_repository(github_url: str) -> str:
                 "--depth",
                 "1",
                 "--filter=blob:none",
-                github_url,
+                sanitized_url,  # Use sanitized URL
                 temp_dir,
             ],
             check=True,
