@@ -76,6 +76,10 @@ class CallGraphAnalyzer:
             f"Deduplication complete. {len(self.call_relationships)} unique relationships found."
         )
 
+        # Clean up disconnected functions for better visualization
+        logger.info("Cleaning up disconnected functions.")
+        self._cleanup_disconnected_functions()
+
         # Generate visualization data
         logger.info("Generating visualization data.")
         viz_data = self._generate_visualization_data()
@@ -417,6 +421,70 @@ class CallGraphAnalyzer:
             f"Removed {len(self.call_relationships) - len(unique_relationships)} duplicate relationships."
         )
         self.call_relationships = unique_relationships
+
+    def _cleanup_disconnected_functions(self):
+        """
+        AGGRESSIVELY remove functions that aren't connected to the call graph.
+        
+        Only keeps functions that are actually part of resolved call relationships.
+        """
+        original_count = len(self.functions)
+        
+        # Build set of connected function IDs (ONLY resolved relationships)
+        connected_function_ids = set()
+        
+        for rel in self.call_relationships:
+            if rel.is_resolved:
+                connected_function_ids.add(rel.caller)
+                connected_function_ids.add(rel.callee)
+        
+        logger.info(f"Found {len(connected_function_ids)} connected function IDs from {len(self.call_relationships)} relationships")
+        
+        # VERY AGGRESSIVE: Only keep functions that are actually connected + main
+        filtered_functions = {}
+        disconnected_count = 0
+        
+        for func_id, func in self.functions.items():
+            if func_id in connected_function_ids:
+                # Part of resolved call graph - keep
+                filtered_functions[func_id] = func
+            elif func.name == 'main':
+                # Always keep main entry point
+                filtered_functions[func_id] = func
+            else:
+                # Filter out EVERYTHING else
+                disconnected_count += 1
+                logger.debug(f"Filtering disconnected function: {func.name} (ID: {func_id})")
+        
+        self.functions = filtered_functions
+        
+        logger.info(f"AGGRESSIVE cleanup: {original_count} -> {len(self.functions)} "
+                   f"(removed {disconnected_count} disconnected functions, "
+                   f"kept {len([f for f in filtered_functions.keys() if f in connected_function_ids])} connected + "
+                   f"{len([f for f in filtered_functions.values() if f.name == 'main'])} main functions)")
+
+    def _is_important_function(self, func) -> bool:
+        """Check if a function is important enough to keep even if disconnected."""
+        # Always keep main entry points
+        if func.name == 'main':
+            return True
+            
+        # Keep likely public APIs (heuristic based on naming/file patterns)
+        if hasattr(func, 'code_snippet') and func.code_snippet:
+            if 'pub ' in func.code_snippet:  # Rust public functions
+                return True
+            if func.code_snippet.startswith('export '):  # JS/TS exports
+                return True
+                
+        # Keep common constructor patterns
+        if func.name in ['new', 'create', 'build', 'init', '__init__']:
+            return True
+            
+        # Keep functions with many parameters (likely important APIs)
+        if hasattr(func, 'parameters') and len(func.parameters) >= 3:
+            return True
+            
+        return False
 
     def _generate_visualization_data(self) -> Dict:
         """

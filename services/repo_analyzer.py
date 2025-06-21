@@ -135,7 +135,7 @@ class RepoAnalyzer:
                     "extension": path.suffix,
                     "_size_bytes": size,  # Internal use only for summary calculations
                 }
-            else:
+            elif path.is_dir():
                 # For directories, recursively process children
                 children = []
                 try:
@@ -156,6 +156,9 @@ class RepoAnalyzer:
                         "path": relative_path_str,
                         "children": children,
                     }
+                return None
+            else:
+                # Path is neither file nor directory (symlink, device, etc.) - skip it
                 return None
 
         return build_tree(Path(repo_dir), Path(repo_dir))

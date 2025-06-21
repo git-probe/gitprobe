@@ -7,7 +7,7 @@ This will be integrated into the AnalysisService to support multi-language analy
 
 import re
 import logging
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from models.core import Function, CallRelationship
 from tree_sitter import Language, Parser
 
@@ -32,6 +32,31 @@ except Exception as e:
     logger.error(f"Error loading tree-sitter languages: {e}", exc_info=True)
     JS_LANGUAGE = None
     TS_LANGUAGE = None
+
+
+class GlobalNodeCounter:
+    """Shared counter for tracking nodes across all files of the same language."""
+    
+    def __init__(self, max_nodes: int = 800):
+        self.max_nodes = max_nodes
+        self.nodes_processed = 0
+        self.limit_reached = False
+    
+    def increment(self) -> bool:
+        """Increment counter and return True if limit reached."""
+        if self.limit_reached:
+            return True
+        
+        self.nodes_processed += 1
+        if self.nodes_processed >= self.max_nodes:
+            self.limit_reached = True
+            logger.warning(f"Global JavaScript node limit of {self.max_nodes} reached. Stopping all JavaScript analysis.")
+            return True
+        return False
+    
+    def should_stop(self) -> bool:
+        """Check if analysis should stop."""
+        return self.limit_reached
 
 
 class JavaScriptASTAnalyzer:
@@ -115,18 +140,23 @@ class JavaScriptASTAnalyzer:
 
     CALL_RE = re.compile(r"([A-Za-z_$][A-Za-z0-9_$]*)\s*\(")
 
-    def __init__(self, file_path: str, content: str):
+    def __init__(self, file_path: str, content: str, global_counter: Optional[GlobalNodeCounter] = None):
         logger.info(f"JavaScriptASTAnalyzer.__init__ called with file_path='{file_path}', content_length={len(content)}")
         
         self.file_path = file_path
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
+        self.global_counter = global_counter or GlobalNodeCounter()
         
-        logger.info("JavaScriptASTAnalyzer.__init__ completed successfully")
+        logger.info(f"JavaScriptASTAnalyzer initialized for {file_path} with global limit: {self.global_counter.max_nodes}")
 
     def analyze(self):
         """Parse the JavaScript file and populate functions and relationships using regex-based heuristics."""
+        if self.global_counter.should_stop():
+            logger.info(f"Skipping {self.file_path} - global JavaScript node limit already reached")
+            return
+            
         logger.info("Starting regex-based JavaScript analysis")
         self.functions = []
         self.call_relationships = []
@@ -135,13 +165,22 @@ class JavaScriptASTAnalyzer:
         self._discover_functions()
 
         # Second pass – discover call relationships inside the known functions
-        self._discover_calls()
-        logger.info(f"Regex analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships")
+        if not self.global_counter.should_stop():
+            self._discover_calls()
+            
+        logger.info(
+            f"JavaScript analysis complete for {self.file_path}: {len(self.functions)} functions, "
+            f"{len(self.call_relationships)} relationships, "
+            f"global_nodes_processed={self.global_counter.nodes_processed}"
+        )
 
     def _discover_functions(self):
         """Locate function definitions (declarations, arrows, methods)."""
         lines = self.content.split("\n")
         for idx, line in enumerate(lines, 1):
+            if self.global_counter.should_stop():
+                break
+                
             line_stripped = line.rstrip()
 
             # Check different function patterns in order of specificity
@@ -189,6 +228,10 @@ class JavaScriptASTAnalyzer:
 
             if not name:
                 continue
+
+            # Count function definitions as meaningful nodes
+            if self.global_counter.increment():
+                break
 
             # Extract parameters if possible
             import re
@@ -271,9 +314,19 @@ class JavaScriptASTAnalyzer:
         }
 
         for func, start, end in boundaries:
+            if self.global_counter.should_stop():
+                break
+                
             caller_id = f"{self.file_path}:{func.name}"
             for ln in range(start, end + 1):
+                if self.global_counter.should_stop():
+                    break
+                    
                 for call_match in self.CALL_RE.finditer(lines[ln - 1]):
+                    # Count function calls as meaningful nodes
+                    if self.global_counter.increment():
+                        return
+                        
                     callee = call_match.group(1)
                     # Skip built-ins when creating relationships:
                     if callee in JS_BUILTINS:
@@ -318,13 +371,13 @@ class TypeScriptASTAnalyzer(JavaScriptASTAnalyzer):
         r"^\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*{", re.ASCII
     )
 
-    def __init__(self, file_path: str, content: str):
+    def __init__(self, file_path: str, content: str, global_counter: Optional[GlobalNodeCounter] = None):
         logger.info(f"TypeScriptASTAnalyzer.__init__ called with file_path='{file_path}', content_length={len(content)}")
         
         # Just call the parent constructor - no tree-sitter needed
-        super().__init__(file_path, content)
+        super().__init__(file_path, content, global_counter)
         
-        logger.info("TypeScriptASTAnalyzer.__init__ completed successfully")
+        logger.info(f"TypeScriptASTAnalyzer initialized for {file_path} with global limit: {self.global_counter.max_nodes}")
 
     # The ``analyze`` method from the parent class already discovers functions
     # and calls, so no override is required.
@@ -349,7 +402,7 @@ class TypeScriptASTAnalyzer(JavaScriptASTAnalyzer):
 
 
 def analyze_javascript_file(
-    file_path: str, content: str
+    file_path: str, content: str, global_counter: Optional[GlobalNodeCounter] = None
 ) -> tuple[List[Function], List[CallRelationship]]:
     """
     Analyze a JavaScript file and return functions and relationships.
@@ -359,7 +412,7 @@ def analyze_javascript_file(
     try:
         logger.info(f"analyze_javascript_file called with file_path='{file_path}', content_length={len(content)}")
         logger.info(f"About to create JavaScriptASTAnalyzer instance")
-        analyzer = JavaScriptASTAnalyzer(file_path, content)
+        analyzer = JavaScriptASTAnalyzer(file_path, content, global_counter)
         logger.info(f"JavaScriptASTAnalyzer created successfully, calling analyze()")
         analyzer.analyze()
         logger.info(f"Analysis complete, returning {len(analyzer.functions)} functions and {len(analyzer.call_relationships)} relationships")
@@ -370,7 +423,7 @@ def analyze_javascript_file(
 
 
 def analyze_typescript_file(
-    file_path: str, content: str
+    file_path: str, content: str, global_counter: Optional[GlobalNodeCounter] = None
 ) -> tuple[List[Function], List[CallRelationship]]:
     """
     Analyze a TypeScript file and return functions and relationships.
@@ -379,7 +432,7 @@ def analyze_typescript_file(
     try:
         logger.info(f"analyze_typescript_file called with file_path='{file_path}', content_length={len(content)}")
         logger.info(f"About to create TypeScriptASTAnalyzer instance")
-        analyzer = TypeScriptASTAnalyzer(file_path, content)
+        analyzer = TypeScriptASTAnalyzer(file_path, content, global_counter)
         logger.info(f"TypeScriptASTAnalyzer created successfully, calling analyze()")
         analyzer.analyze()
         logger.info(f"Analysis complete, returning {len(analyzer.functions)} functions and {len(analyzer.call_relationships)} relationships")
