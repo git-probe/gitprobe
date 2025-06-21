@@ -6,6 +6,7 @@ replacing the regex-based approach with a more accurate tree-sitter implementati
 """
 
 import logging
+import time
 from typing import List, Set, Optional
 from pathlib import Path
 
@@ -18,20 +19,56 @@ from models.core import Function, CallRelationship
 logger = logging.getLogger(__name__)
 
 
+class AnalysisLimits:
+    """Configurable limits for JavaScript/TypeScript analysis to prevent excessive resource usage."""
+    
+    def __init__(self, max_nodes: int = 800, max_time: float = 10.0):
+        self.max_nodes = max_nodes
+        self.max_time = max_time
+        self.nodes_processed = 0
+        self.start_time = time.time()
+        self.limit_reached = False
+    
+    def increment(self) -> bool:
+        """Increment node counter and check limits. Returns True if limits exceeded."""
+        if self.limit_reached:
+            return True
+        
+        self.nodes_processed += 1
+        elapsed = time.time() - self.start_time
+        
+        if self.nodes_processed >= self.max_nodes:
+            logger.warning(f"JavaScript analysis hit node limit: {self.max_nodes} nodes")
+            self.limit_reached = True
+            return True
+        
+        if elapsed >= self.max_time:
+            logger.warning(f"JavaScript analysis hit time limit: {self.max_time}s")
+            self.limit_reached = True
+            return True
+        
+        return False
+    
+    def should_stop(self) -> bool:
+        """Check if analysis should stop due to limits."""
+        return self.limit_reached
+
+
 class TreeSitterJSAnalyzer:
     """JavaScript analyzer using tree-sitter for proper AST parsing."""
     
-    def __init__(self, file_path: str, content: str):
+    def __init__(self, file_path: str, content: str, limits: Optional[AnalysisLimits] = None):
         self.file_path = Path(file_path)
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
+        self.limits = limits or AnalysisLimits()
         
         # Initialize tree-sitter
         self.js_language = tree_sitter.Language(tree_sitter_javascript.language())
         self.parser = tree_sitter.Parser(self.js_language)
         
-        logger.info(f"TreeSitterJSAnalyzer initialized for {file_path}")
+        logger.info(f"TreeSitterJSAnalyzer initialized for {file_path} with limits: {self.limits.max_nodes} nodes, {self.limits.max_time}s")
     
     def analyze(self) -> None:
         """Analyze the JavaScript content and extract functions and call relationships."""
@@ -45,10 +82,11 @@ class TreeSitterJSAnalyzer:
             # Extract functions
             self._extract_functions(root_node)
             
-            # Extract call relationships
-            self._extract_call_relationships(root_node)
+            # Extract call relationships (only if we haven't hit limits)
+            if not self.limits.should_stop():
+                self._extract_call_relationships(root_node)
             
-            logger.info(f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships")
+            logger.info(f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships, {self.limits.nodes_processed} nodes processed")
             
         except Exception as e:
             logger.error(f"Error analyzing JavaScript file {self.file_path}: {e}", exc_info=True)
@@ -60,6 +98,10 @@ class TreeSitterJSAnalyzer:
     
     def _traverse_for_functions(self, node) -> None:
         """Recursively traverse AST nodes to find functions."""
+        
+        # Check limits before processing
+        if self.limits.increment():
+            return
         
         # Handle different function types
         if node.type == 'function_declaration':
@@ -82,8 +124,10 @@ class TreeSitterJSAnalyzer:
             if func and self._should_include_function(func):
                 self.functions.append(func)
         
-        # Recursively process all child nodes
+        # Recursively process all child nodes (with limit checks)
         for child in node.children:
+            if self.limits.should_stop():
+                break
             self._traverse_for_functions(child)
     
     def _extract_function_declaration(self, node) -> Optional[Function]:
@@ -235,12 +279,19 @@ class TreeSitterJSAnalyzer:
     
     def _traverse_for_calls(self, node, func_ranges: dict) -> None:
         """Recursively find function calls."""
+        
+        # Check limits before processing
+        if self.limits.increment():
+            return
+        
         if node.type == 'call_expression':
             call_info = self._extract_call_from_node(node, func_ranges)
             if call_info:
                 self.call_relationships.append(call_info)
         
         for child in node.children:
+            if self.limits.should_stop():
+                break
             self._traverse_for_calls(child, func_ranges)
     
     def _extract_call_from_node(self, node, func_ranges: dict) -> Optional[CallRelationship]:
@@ -318,17 +369,18 @@ class TreeSitterJSAnalyzer:
 class TreeSitterTSAnalyzer(TreeSitterJSAnalyzer):
     """TypeScript analyzer using tree-sitter."""
     
-    def __init__(self, file_path: str, content: str):
+    def __init__(self, file_path: str, content: str, limits: Optional[AnalysisLimits] = None):
         self.file_path = Path(file_path)
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
+        self.limits = limits or AnalysisLimits()
         
         # Initialize tree-sitter for TypeScript
         self.ts_language = tree_sitter.Language(tree_sitter_typescript.language_typescript())
         self.parser = tree_sitter.Parser(self.ts_language)
         
-        logger.info(f"TreeSitterTSAnalyzer initialized for {file_path}")
+        logger.info(f"TreeSitterTSAnalyzer initialized for {file_path} with limits: {self.limits.max_nodes} nodes, {self.limits.max_time}s")
 
 
 # Integration functions
@@ -338,9 +390,10 @@ def analyze_javascript_file_treesitter(
     """Analyze a JavaScript file using tree-sitter."""
     try:
         logger.info(f"Tree-sitter JS analysis for {file_path}")
-        analyzer = TreeSitterJSAnalyzer(file_path, content)
+        limits = AnalysisLimits(max_nodes=800, max_time=10.0)
+        analyzer = TreeSitterJSAnalyzer(file_path, content, limits)
         analyzer.analyze()
-        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls")
+        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {limits.nodes_processed} nodes processed")
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
         logger.error(f"Error in tree-sitter JS analysis for {file_path}: {e}", exc_info=True)
@@ -353,9 +406,10 @@ def analyze_typescript_file_treesitter(
     """Analyze a TypeScript file using tree-sitter."""
     try:
         logger.info(f"Tree-sitter TS analysis for {file_path}")
-        analyzer = TreeSitterTSAnalyzer(file_path, content)
+        limits = AnalysisLimits(max_nodes=800, max_time=10.0)
+        analyzer = TreeSitterTSAnalyzer(file_path, content, limits)
         analyzer.analyze()
-        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls")
+        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {limits.nodes_processed} nodes processed")
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
         logger.error(f"Error in tree-sitter TS analysis for {file_path}: {e}", exc_info=True)
