@@ -42,6 +42,8 @@ class CallGraphAnalyzer:
         """Initialize the call graph analyzer."""
         self.functions: Dict[str, Function] = {}
         self.call_relationships: List[CallRelationship] = []
+        # Shared counter for C/C++ files to prevent excessive analysis
+        self.c_cpp_global_counter = None
         logger.info("CallGraphAnalyzer initialized.")
 
     def analyze_code_files(self, code_files: List[Dict], base_dir: str) -> Dict:
@@ -59,6 +61,10 @@ class CallGraphAnalyzer:
         # Reset state for new analysis
         self.functions = {}
         self.call_relationships = []
+        
+        # Initialize shared C/C++ counter
+        from .c_analyzer_treesitter import GlobalNodeCounter
+        self.c_cpp_global_counter = GlobalNodeCounter(max_nodes=1000)
 
         # Analyze each code file based on its language
         for file_info in code_files:
@@ -276,15 +282,15 @@ class CallGraphAnalyzer:
 
     def _analyze_c_file(self, file_path: str, content: str):
         """
-        Analyze C file using C AST analyzer.
+        Analyze C file using tree-sitter based analyzer.
 
         Args:
             file_path: Relative path to the C file
             content: File content string
         """
-        from .c_analyzer import analyze_c_file
+        from .c_analyzer_treesitter import analyze_c_file_treesitter
 
-        functions, relationships = analyze_c_file(file_path, content)
+        functions, relationships = analyze_c_file_treesitter(file_path, content, self.c_cpp_global_counter)
 
         # Store functions with unique identifiers
         for func in functions:
@@ -296,15 +302,15 @@ class CallGraphAnalyzer:
 
     def _analyze_cpp_file(self, file_path: str, content: str):
         """
-        Analyze C++ file using C++ AST analyzer.
+        Analyze C++ file using tree-sitter based analyzer.
 
         Args:
             file_path: Relative path to the C++ file
             content: File content string
         """
-        from .c_analyzer import analyze_cpp_file
+        from .c_analyzer_treesitter import analyze_cpp_file_treesitter
 
-        functions, relationships = analyze_cpp_file(file_path, content)
+        functions, relationships = analyze_cpp_file_treesitter(file_path, content, self.c_cpp_global_counter)
 
         # Store functions with unique identifiers
         for func in functions:
