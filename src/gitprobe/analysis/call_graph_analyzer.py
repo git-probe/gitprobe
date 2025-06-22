@@ -9,8 +9,8 @@ across different programming languages in a repository.
 from pathlib import Path
 from typing import Dict, List
 import logging
-from models.core import Function, CallRelationship
-from utils.patterns import CODE_EXTENSIONS
+from gitprobe.models.core import Function, CallRelationship
+from gitprobe.utils.patterns import CODE_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -42,52 +42,78 @@ class CallGraphAnalyzer:
         """Initialize the call graph analyzer."""
         self.functions: Dict[str, Function] = {}
         self.call_relationships: List[CallRelationship] = []
-        # Shared counter for C/C++ files to prevent excessive analysis
+        # Shared counters for different languages to prevent excessive analysis
         self.c_cpp_global_counter = None
+        self.js_global_limits = None
         logger.info("CallGraphAnalyzer initialized.")
 
     def analyze_code_files(self, code_files: List[Dict], base_dir: str) -> Dict:
         """
-        Analyze a list of code files from multiple languages.
-
-        Args:
-            code_files: List of file info dicts with path, language, etc.
-            base_dir: Base directory path where files are located
-
-        Returns:
-            Dict with functions, relationships, and visualization data
+        Relationship-maximizing analysis: Analyze all files to build complete call graph,
+        then return the most connected 800-1000 nodes for optimal frontend rendering.
+        
+        This approach:
+        1. Analyzes all code files (within limits)
+        2. Extracts all functions and relationships 
+        3. Builds complete call graph
+        4. Ranks nodes by connectivity (degree centrality)
+        5. Returns top 800-1000 most connected nodes
         """
-        logger.info(f"Starting analysis of {len(code_files)} code files.")
+        logger.info(f"Starting relationship-maximizing analysis of {len(code_files)} files")
+
         # Reset state for new analysis
         self.functions = {}
         self.call_relationships = []
         
-        # Initialize shared C/C++ counter
-        from .c_analyzer_treesitter import GlobalNodeCounter
-        self.c_cpp_global_counter = GlobalNodeCounter(max_nodes=1000)
-
-        # Analyze each code file based on its language
+        # Reset global tracker for new analysis
+        from gitprobe.core.analysis_limits import reset_global_tracker
+        reset_global_tracker()
+        
+        # Set up analysis limits for each language
+        from gitprobe.core.analysis_limits import create_python_limits, create_javascript_limits, create_go_limits, create_rust_limits, create_c_cpp_limits
+        
+        self.limits = {
+            'python': create_python_limits(),
+            'javascript': create_javascript_limits(),
+            'typescript': create_javascript_limits(),
+            'go': create_go_limits(),
+            'rust': create_rust_limits(),
+            'c': create_c_cpp_limits(),
+            'cpp': create_c_cpp_limits()
+        }
+        
+        # Analyze all code files to maximize relationship discovery
+        logger.info("Analyzing all code files to maximize relationships")
+        files_analyzed = 0
         for file_info in code_files:
-            logger.debug(f"Analyzing file: {file_info['path']}")
+            # Check global limits
+            from gitprobe.core.analysis_limits import get_global_tracker
+            global_tracker = get_global_tracker()
+            if global_tracker.should_stop():
+                logger.info(f"Global limits reached after {files_analyzed} files")
+                break
+                
+            logger.debug(f"Analyzing: {file_info['path']}")
             self._analyze_code_file(base_dir, file_info)
-
-        logger.info("Initial analysis complete. Resolving call relationships.")
-        # Resolve cross-language relationships
+            files_analyzed += 1
+            
+            # Log progress every 20 files
+            if files_analyzed % 20 == 0:
+                logger.info(f"Progress: {files_analyzed} files, {len(self.functions)} functions, {len(self.call_relationships)} relationships")
+        
+        logger.info(f"Analysis complete: {files_analyzed} files analyzed, {len(self.functions)} functions, {len(self.call_relationships)} relationships")
+        
+        # Resolve relationships to build complete call graph
+        logger.info("Resolving call relationships")
         self._resolve_call_relationships()
-
-        # After collecting all relationships, deduplicate:
-        logger.info("Deduplicating call relationships.")
         self._deduplicate_relationships()
-        logger.info(
-            f"Deduplication complete. {len(self.call_relationships)} unique relationships found."
-        )
-
-        # Clean up disconnected functions for better visualization
-        logger.info("Cleaning up disconnected functions.")
-        self._cleanup_disconnected_functions()
-
+        
+        # Select most connected nodes for frontend (800-1000 max)
+        logger.info("Selecting most connected nodes for frontend")
+        self._select_most_connected_nodes(target_count=900)  # Aim for ~900 nodes
+        
         # Generate visualization data
-        logger.info("Generating visualization data.")
+        logger.info("Generating visualization data")
         viz_data = self._generate_visualization_data()
 
         return {
@@ -95,7 +121,8 @@ class CallGraphAnalyzer:
                 "total_functions": len(self.functions),
                 "total_calls": len(self.call_relationships),
                 "languages_found": list(set(f.get("language") for f in code_files)),
-                "files_analyzed": len(code_files),
+                "files_analyzed": files_analyzed,
+                "analysis_approach": "relationship_maximizing"
             },
             "functions": [func.dict() for func in self.functions.values()],
             "relationships": [rel.dict() for rel in self.call_relationships],
@@ -190,10 +217,10 @@ class CallGraphAnalyzer:
             file_path: Relative path to the Python file
             content: File content string
         """
-        from .python_analyzer import analyze_python_file
+        from gitprobe.analyzers.python import analyze_python_file
 
         try:
-            functions, relationships = analyze_python_file(file_path, content)
+            functions, relationships = analyze_python_file(file_path, content, self.limits['python'])
             logger.info(
                 f"Found {len(functions)} functions and {len(relationships)} relationships in {file_path}"
             )
@@ -212,7 +239,7 @@ class CallGraphAnalyzer:
 
     def _analyze_javascript_file(self, file_path: str, content: str):
         """
-        Analyze JavaScript file using tree-sitter based AST analyzer.
+        Analyze JavaScript file using tree-sitter based AST analyzer with global limits.
 
         Args:
             file_path: Relative path to the JavaScript file
@@ -220,15 +247,11 @@ class CallGraphAnalyzer:
         """
         try:
             logger.info(f"Starting tree-sitter JavaScript analysis for {file_path}")
-            # Use the new tree-sitter based analyzer
-            from .js_analyzer import analyze_javascript_file_treesitter
-
-            logger.info(
-                f"About to call analyze_javascript_file_treesitter with args: file_path='{file_path}', content_length={len(content)}"
-            )
-            functions, relationships = analyze_javascript_file_treesitter(
-                file_path, content
-            )
+            
+            from gitprobe.analyzers.javascript import analyze_javascript_file_treesitter
+            
+            functions, relationships = analyze_javascript_file_treesitter(file_path, content, self.limits['javascript'])
+            
             logger.info(
                 f"Tree-sitter JavaScript analysis completed for {file_path}: {len(functions)} functions, {len(relationships)} relationships"
             )
@@ -240,6 +263,7 @@ class CallGraphAnalyzer:
 
             # Store call relationships
             self.call_relationships.extend(relationships)
+            
         except Exception as e:
             logger.error(
                 f"Failed to analyze JavaScript file {file_path}: {e}", exc_info=True
@@ -247,7 +271,7 @@ class CallGraphAnalyzer:
 
     def _analyze_typescript_file(self, file_path: str, content: str):
         """
-        Analyze TypeScript file using tree-sitter based AST analyzer.
+        Analyze TypeScript file using tree-sitter based AST analyzer with global limits.
 
         Args:
             file_path: Relative path to the TypeScript file
@@ -255,15 +279,11 @@ class CallGraphAnalyzer:
         """
         try:
             logger.info(f"Starting tree-sitter TypeScript analysis for {file_path}")
-            # Use the new tree-sitter based analyzer
-            from .js_analyzer import analyze_typescript_file_treesitter
-
-            logger.info(
-                f"About to call analyze_typescript_file_treesitter with args: file_path='{file_path}', content_length={len(content)}"
-            )
-            functions, relationships = analyze_typescript_file_treesitter(
-                file_path, content
-            )
+            
+            from gitprobe.analyzers.javascript import analyze_typescript_file_treesitter
+            
+            functions, relationships = analyze_typescript_file_treesitter(file_path, content, self.limits['typescript'])
+            
             logger.info(
                 f"Tree-sitter TypeScript analysis completed for {file_path}: {len(functions)} functions, {len(relationships)} relationships"
             )
@@ -275,6 +295,7 @@ class CallGraphAnalyzer:
 
             # Store call relationships
             self.call_relationships.extend(relationships)
+            
         except Exception as e:
             logger.error(
                 f"Failed to analyze TypeScript file {file_path}: {e}", exc_info=True
@@ -288,9 +309,9 @@ class CallGraphAnalyzer:
             file_path: Relative path to the C file
             content: File content string
         """
-        from .c_analyzer_treesitter import analyze_c_file_treesitter
+        from gitprobe.analyzers.c_cpp import analyze_c_file_treesitter
 
-        functions, relationships = analyze_c_file_treesitter(file_path, content, self.c_cpp_global_counter)
+        functions, relationships = analyze_c_file_treesitter(file_path, content, self.limits['c'])
 
         # Store functions with unique identifiers
         for func in functions:
@@ -308,9 +329,9 @@ class CallGraphAnalyzer:
             file_path: Relative path to the C++ file
             content: File content string
         """
-        from .c_analyzer_treesitter import analyze_cpp_file_treesitter
+        from gitprobe.analyzers.c_cpp import analyze_cpp_file_treesitter
 
-        functions, relationships = analyze_cpp_file_treesitter(file_path, content, self.c_cpp_global_counter)
+        functions, relationships = analyze_cpp_file_treesitter(file_path, content, self.limits['cpp'])
 
         # Store functions with unique identifiers
         for func in functions:
@@ -328,10 +349,10 @@ class CallGraphAnalyzer:
             file_path: Relative path to the Go file
             content: File content string
         """
-        from .go_analyzer import analyze_go_file_treesitter
+        from gitprobe.analyzers.go import analyze_go_file_treesitter
 
         try:
-            functions, relationships = analyze_go_file_treesitter(file_path, content)
+            functions, relationships = analyze_go_file_treesitter(file_path, content, self.limits['go'])
             logger.info(
                 f"Found {len(functions)} functions and {len(relationships)} relationships in {file_path}"
             )
@@ -354,10 +375,10 @@ class CallGraphAnalyzer:
             file_path: Relative path to the Rust file
             content: File content string
         """
-        from .rust_analyzer import analyze_rust_file_treesitter
+        from gitprobe.analyzers.rust import analyze_rust_file_treesitter
 
         try:
-            functions, relationships = analyze_rust_file_treesitter(file_path, content)
+            functions, relationships = analyze_rust_file_treesitter(file_path, content, self.limits['rust'])
             logger.info(
                 f"Found {len(functions)} functions and {len(relationships)} relationships in {file_path}"
             )
@@ -428,69 +449,7 @@ class CallGraphAnalyzer:
         )
         self.call_relationships = unique_relationships
 
-    def _cleanup_disconnected_functions(self):
-        """
-        AGGRESSIVELY remove functions that aren't connected to the call graph.
-        
-        Only keeps functions that are actually part of resolved call relationships.
-        """
-        original_count = len(self.functions)
-        
-        # Build set of connected function IDs (ONLY resolved relationships)
-        connected_function_ids = set()
-        
-        for rel in self.call_relationships:
-            if rel.is_resolved:
-                connected_function_ids.add(rel.caller)
-                connected_function_ids.add(rel.callee)
-        
-        logger.info(f"Found {len(connected_function_ids)} connected function IDs from {len(self.call_relationships)} relationships")
-        
-        # VERY AGGRESSIVE: Only keep functions that are actually connected + main
-        filtered_functions = {}
-        disconnected_count = 0
-        
-        for func_id, func in self.functions.items():
-            if func_id in connected_function_ids:
-                # Part of resolved call graph - keep
-                filtered_functions[func_id] = func
-            elif func.name == 'main':
-                # Always keep main entry point
-                filtered_functions[func_id] = func
-            else:
-                # Filter out EVERYTHING else
-                disconnected_count += 1
-                logger.debug(f"Filtering disconnected function: {func.name} (ID: {func_id})")
-        
-        self.functions = filtered_functions
-        
-        logger.info(f"AGGRESSIVE cleanup: {original_count} -> {len(self.functions)} "
-                   f"(removed {disconnected_count} disconnected functions, "
-                   f"kept {len([f for f in filtered_functions.keys() if f in connected_function_ids])} connected + "
-                   f"{len([f for f in filtered_functions.values() if f.name == 'main'])} main functions)")
 
-    def _is_important_function(self, func) -> bool:
-        """Check if a function is important enough to keep even if disconnected."""
-        # Always keep main entry points
-        if func.name == 'main':
-            return True
-            
-        # Keep likely public APIs (heuristic based on naming/file patterns)
-        if hasattr(func, 'code_snippet') and func.code_snippet:
-            if 'pub ' in func.code_snippet:  # Rust public functions
-                return True
-            if func.code_snippet.startswith('export '):  # JS/TS exports
-                return True
-                
-        # Keep common constructor patterns
-        if func.name in ['new', 'create', 'build', 'init', '__init__']:
-            return True
-            
-        # Keep functions with many parameters (likely important APIs)
-        if hasattr(func, 'parameters') and len(func.parameters) >= 3:
-            return True
-            
-        return False
 
     def _generate_visualization_data(self) -> Dict:
         """
@@ -604,3 +563,62 @@ class CallGraphAnalyzer:
                 for func in self.functions.values()
             },
         }
+
+    def _select_most_connected_nodes(self, target_count: int):
+        """
+        Select the most connected nodes from the call graph.
+
+        Args:
+            target_count: The number of nodes to select
+        """
+        if len(self.functions) <= target_count:
+            logger.info(f"Have {len(self.functions)} functions, target is {target_count} - keeping all")
+            return
+            
+        if not self.call_relationships:
+            logger.warning("No call relationships found - keeping all functions by name")
+            # Just keep the first target_count functions
+            func_ids = list(self.functions.keys())[:target_count]
+            self.functions = {fid: func for fid, func in self.functions.items() if fid in func_ids}
+            return
+            
+        # Build adjacency graph using function IDs that exist in our functions dict
+        graph = {}
+        for rel in self.call_relationships:
+            # Only include nodes that correspond to actual functions we have
+            if rel.caller in self.functions:
+                if rel.caller not in graph:
+                    graph[rel.caller] = set()
+            if rel.callee in self.functions:
+                if rel.callee not in graph:
+                    graph[rel.callee] = set()
+                    
+            # Add edges for nodes that exist
+            if rel.caller in graph and rel.callee in graph:
+                graph[rel.caller].add(rel.callee)
+                graph[rel.callee].add(rel.caller)  # Treat as undirected
+        
+        # Calculate degree centrality for functions that have relationships
+        degree_centrality = {}
+        for func_id in self.functions.keys():
+            degree_centrality[func_id] = len(graph.get(func_id, set()))
+        
+        # Sort functions by degree centrality (most connected first)
+        sorted_func_ids = sorted(degree_centrality, key=degree_centrality.get, reverse=True)
+        
+        # Select top functions
+        selected_func_ids = sorted_func_ids[:target_count]
+        
+        # Filter functions and relationships
+        original_func_count = len(self.functions)
+        self.functions = {fid: func for fid, func in self.functions.items() if fid in selected_func_ids}
+        
+        original_rel_count = len(self.call_relationships)
+        self.call_relationships = [
+            rel for rel in self.call_relationships 
+            if rel.caller in selected_func_ids and rel.callee in selected_func_ids
+        ]
+        
+        logger.info(f"Node selection: {original_func_count} -> {len(self.functions)} functions, "
+                   f"{original_rel_count} -> {len(self.call_relationships)} relationships")
+        logger.info(f"Kept {len(selected_func_ids)} most connected nodes (target: {target_count})")

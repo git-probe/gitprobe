@@ -10,11 +10,11 @@ import logging
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
-from .repo_analyzer import RepoAnalyzer
-from .call_graph_analyzer import CallGraphAnalyzer
-from .cloning import clone_repository, cleanup_repository, parse_github_url
-from models.analysis import AnalysisResult
-from models.core import Repository
+from gitprobe.analysis.repo_analyzer import RepoAnalyzer
+from gitprobe.analysis.call_graph_analyzer import CallGraphAnalyzer
+from gitprobe.analysis.cloning import clone_repository, cleanup_repository, parse_github_url
+from gitprobe.models.analysis import AnalysisResult
+from gitprobe.models.core import Repository
 
 logger = logging.getLogger(__name__)
 

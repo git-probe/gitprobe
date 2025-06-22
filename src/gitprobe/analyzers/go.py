@@ -1,97 +1,70 @@
 """
-Advanced Go analyzer using Tree-sitter for accurate AST parsing.
-
-This module provides proper AST-based analysis for Go files,
-using tree-sitter for accurate function and call relationship extraction.
+Go analyzer using tree-sitter for accurate AST parsing and function extraction.
 """
 
 import logging
 from typing import List, Set, Optional
 from pathlib import Path
 
-import tree_sitter
-import tree_sitter_go
+try:
+    from tree_sitter_languages import get_language, get_parser
+    TREE_SITTER_LANGUAGES_AVAILABLE = True
+except ImportError:
+    TREE_SITTER_LANGUAGES_AVAILABLE = False
+    import tree_sitter
+    import tree_sitter_go
 
-from models.core import Function, CallRelationship
+from gitprobe.models.core import Function, CallRelationship
+from gitprobe.core.analysis_limits import AnalysisLimits, create_go_limits
 
 logger = logging.getLogger(__name__)
 
 
-class GlobalNodeCounter:
-    """Shared counter for tracking nodes across all files of the same language."""
-    
-    def __init__(self, max_nodes: int = 800):
-        self.max_nodes = max_nodes
-        self.nodes_processed = 0
-        self.limit_reached = False
-    
-    def increment(self) -> bool:
-        """Increment counter and return True if limit reached."""
-        if self.limit_reached:
-            return True
-        
-        self.nodes_processed += 1
-        if self.nodes_processed >= self.max_nodes:
-            self.limit_reached = True
-            logger.warning(f"Global Go node limit of {self.max_nodes} reached. Stopping all Go analysis.")
-            return True
-        return False
-    
-    def should_stop(self) -> bool:
-        """Check if analysis should stop."""
-        return self.limit_reached
-
-
 class TreeSitterGoAnalyzer:
     """Go analyzer using tree-sitter for proper AST parsing."""
-
-    def __init__(self, file_path: str, content: str, global_counter: Optional[GlobalNodeCounter] = None):
+    
+    def __init__(self, file_path: str, content: str, limits: Optional[AnalysisLimits] = None):
         self.file_path = Path(file_path)
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
-        self.global_counter = global_counter or GlobalNodeCounter()
-
+        self.limits = limits or create_go_limits()
+        
         # Initialize tree-sitter
-        self.go_language = tree_sitter.Language(tree_sitter_go.language())
-        self.parser = tree_sitter.Parser(self.go_language)
-
-        logger.info(f"TreeSitterGoAnalyzer initialized for {file_path} with global limit: {self.global_counter.max_nodes}")
-
+        if TREE_SITTER_LANGUAGES_AVAILABLE:
+            self.go_language = get_language("go")
+            self.parser = get_parser("go")
+        else:
+            self.go_language = tree_sitter.Language(tree_sitter_go.language(), "go")
+            self.parser = tree_sitter.Parser()
+            self.parser.set_language(self.go_language)
+        
+        logger.info(f"TreeSitterGoAnalyzer initialized for {file_path} with limits: {self.limits}")
+    
     def analyze(self) -> None:
         """Analyze the Go content and extract functions and call relationships."""
-        if self.global_counter.should_stop():
-            logger.info(f"Skipping {self.file_path} - global Go node limit already reached")
+        if not self.limits.start_new_file():
+            logger.info(f"Skipping {self.file_path} - global limits reached")
             return
             
         try:
             # Parse the content into an AST
             tree = self.parser.parse(bytes(self.content, "utf8"))
             root_node = tree.root_node
-
+            
             logger.info(f"Parsed AST with root node type: {root_node.type}")
-
+            
             # Extract functions
             self._extract_functions(root_node)
-
-            if not self.global_counter.should_stop():
-                # Extract call relationships
+            
+            # Extract call relationships (only if we haven't hit limits)
+            if not self.limits.should_stop():
                 self._extract_call_relationships(root_node)
-
-            logger.info(
-                f"Go analysis complete for {self.file_path}: {len(self.functions)} functions, "
-                f"{len(self.call_relationships)} relationships, "
-                f"global_nodes_processed={self.global_counter.nodes_processed}"
-            )
-
+            
+            logger.info(f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships, {self.limits.nodes_processed} nodes processed")
+            
         except Exception as e:
-            logger.error(
-                f"Error analyzing Go file {self.file_path}: {e}", exc_info=True
-            )
-
-    def _check_node_limit(self) -> bool:
-        """Checks if the node processing limit has been reached. Returns True if analysis should stop."""
-        return self.global_counter.increment()
+            logger.error(f"Error analyzing Go file {self.file_path}: {e}", exc_info=True)
 
     def _extract_functions(self, node) -> None:
         """Extract all function definitions from the AST."""
@@ -100,29 +73,50 @@ class TreeSitterGoAnalyzer:
 
     def _traverse_for_functions(self, node) -> None:
         """Recursively traverse AST nodes to find functions."""
-        if self._check_node_limit():
+        if self.limits.should_stop():
             return
 
         # Handle different function types
         if node.type == "function_declaration":
             func = self._extract_function_declaration(node)
             if func and self._should_include_function(func):
-                self.functions.append(func)
+                # Check global limits before adding function
+                if self.limits.can_add_function():
+                    self.functions.append(func)
+                    # Track in global counter
+                    if self.limits.add_function():
+                        return  # Global limit reached, stop analysis
+                else:
+                    return  # Can't add more functions, stop analysis
 
         elif node.type == "method_declaration":
             func = self._extract_method_declaration(node)
             if func and self._should_include_function(func):
-                self.functions.append(func)
+                # Check global limits before adding function
+                if self.limits.can_add_function():
+                    self.functions.append(func)
+                    # Track in global counter
+                    if self.limits.add_function():
+                        return  # Global limit reached, stop analysis
+                else:
+                    return  # Can't add more functions, stop analysis
 
         elif node.type == "func_literal":
             func = self._extract_func_literal(node)
             if func and self._should_include_function(func):
-                self.functions.append(func)
+                # Check global limits before adding function
+                if self.limits.can_add_function():
+                    self.functions.append(func)
+                    # Track in global counter
+                    if self.limits.add_function():
+                        return  # Global limit reached, stop analysis
+                else:
+                    return  # Can't add more functions, stop analysis
 
         # Recursively process all child nodes
         for child in node.children:
             self._traverse_for_functions(child)
-            if self.global_counter.should_stop():
+            if self.limits.should_stop():
                 break
 
     def _extract_function_declaration(self, node) -> Optional[Function]:
@@ -301,17 +295,24 @@ class TreeSitterGoAnalyzer:
 
     def _traverse_for_calls(self, node, func_ranges: dict) -> None:
         """Recursively find function calls."""
-        if self._check_node_limit():
+        if self.limits.should_stop():
             return
 
         if node.type == "call_expression":
             call_info = self._extract_call_from_node(node, func_ranges)
             if call_info:
-                self.call_relationships.append(call_info)
+                # Check global limits before adding relationship
+                if self.limits.can_add_relationship():
+                    self.call_relationships.append(call_info)
+                    # Track in global counter
+                    if self.limits.add_relationship():
+                        return  # Global limit reached, stop analysis
+                else:
+                    return  # Can't add more relationships, stop analysis
 
         for child in node.children:
             self._traverse_for_calls(child, func_ranges)
-            if self.global_counter.should_stop():
+            if self.limits.should_stop():
                 break
 
     def _extract_call_from_node(
@@ -444,16 +445,14 @@ class TreeSitterGoAnalyzer:
 
 # Integration functions
 def analyze_go_file_treesitter(
-    file_path: str, content: str, global_counter: Optional[GlobalNodeCounter] = None
+    file_path: str, content: str, limits: Optional[AnalysisLimits] = None
 ) -> tuple[List[Function], List[CallRelationship]]:
     """Analyze a Go file using tree-sitter."""
     try:
         logger.info(f"Tree-sitter Go analysis for {file_path}")
-        analyzer = TreeSitterGoAnalyzer(file_path, content, global_counter)
+        analyzer = TreeSitterGoAnalyzer(file_path, content, limits)
         analyzer.analyze()
-        logger.info(
-            f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls"
-        )
+        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed")
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
         logger.error(

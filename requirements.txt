@@ -5,9 +5,9 @@ pydantic>=2.0.0
 fastapi>=0.100.0
 uvicorn>=0.23.0
 python-multipart
-tree-sitter 
-tree-sitter-c
-tree-sitter-cpp
+tree-sitter>=0.20.0
+tree-sitter-c>=0.20.6
+tree-sitter-cpp>=0.20.0
 tree-sitter-go
 tree-sitter-javascript
 tree-sitter-typescript

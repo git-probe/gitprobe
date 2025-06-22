@@ -1,3 +1,0 @@
-"""
-GitProbe Services Package
-"""

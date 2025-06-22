@@ -1,18 +1,21 @@
 """
-Advanced Rust analyzer using Tree-sitter for accurate AST parsing.
-
-This module provides proper AST-based analysis for Rust files,
-using tree-sitter for accurate function and call relationship extraction.
+Rust analyzer using tree-sitter for accurate AST parsing and function extraction.
 """
 
 import logging
 from typing import List, Set, Optional
 from pathlib import Path
 
-import tree_sitter
-import tree_sitter_rust
+try:
+    from tree_sitter_languages import get_language, get_parser
+    TREE_SITTER_LANGUAGES_AVAILABLE = True
+except ImportError:
+    TREE_SITTER_LANGUAGES_AVAILABLE = False
+    import tree_sitter
+    import tree_sitter_rust
 
-from models.core import Function, CallRelationship
+from gitprobe.models.core import Function, CallRelationship
+from gitprobe.core.analysis_limits import AnalysisLimits, create_rust_limits
 
 logger = logging.getLogger(__name__)
 
@@ -42,154 +45,78 @@ class GlobalNodeCounter:
         return self.limit_reached
 
 
-class AnalysisLimits:
-    """Configuration for analysis limits to prevent crashes on large codebases."""
-    
-    def __init__(
-        self,
-        max_nodes: int = 800,  # This is now ignored in favor of global counter
-        max_depth: int = 20,   # Shallower depth
-        max_functions: int = 100,  # Way fewer functions
-        max_function_size: int = 100,  # Smaller functions only
-        prioritize_public: bool = True,
-        sample_large_files: bool = True,
-        sample_ratio: float = 0.1  # Sample only 10% of functions if file is too large
-    ):
-        self.max_nodes = max_nodes  # Kept for backward compatibility
-        self.max_depth = max_depth
-        self.max_functions = max_functions
-        self.max_function_size = max_function_size
-        self.prioritize_public = prioritize_public
-        self.sample_large_files = sample_large_files
-        self.sample_ratio = sample_ratio
-
-
 class TreeSitterRustAnalyzer:
     """Rust analyzer using tree-sitter for proper AST parsing."""
-
-    def __init__(self, file_path: str, content: str, limits: Optional[AnalysisLimits] = None, 
-                 global_counter: Optional[GlobalNodeCounter] = None):
+    
+    def __init__(self, file_path: str, content: str, limits: Optional[AnalysisLimits] = None):
         self.file_path = Path(file_path)
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
-        self.limits = limits or AnalysisLimits()
-        self.global_counter = global_counter or GlobalNodeCounter()
+        self.limits = limits or create_rust_limits()
         
-        # Tracking for limits
-        self.current_depth = 0
-        self.analysis_truncated = False
-        
-        import time
-        self.start_time = time.time()
-        self.max_analysis_time = 10.0  # Maximum 10 seconds per file
-
         # Initialize tree-sitter
-        self.rust_language = tree_sitter.Language(tree_sitter_rust.language())
-        self.parser = tree_sitter.Parser(self.rust_language)
-
-        logger.info(f"TreeSitterRustAnalyzer initialized for {file_path} with global limit: "
-                   f"max_nodes={self.global_counter.max_nodes}, max_depth={self.limits.max_depth}")
-
+        if TREE_SITTER_LANGUAGES_AVAILABLE:
+            self.rust_language = get_language("rust")
+            self.parser = get_parser("rust")
+        else:
+            self.rust_language = tree_sitter.Language(tree_sitter_rust.language())
+            self.parser = tree_sitter.Parser(self.rust_language)
+        
+        logger.info(f"TreeSitterRustAnalyzer initialized for {file_path} with limits: {self.limits}")
+    
     def analyze(self) -> None:
         """Analyze the Rust content and extract functions and call relationships."""
-        if self.global_counter.should_stop():
-            logger.info(f"Skipping {self.file_path} - global node limit already reached")
+        if not self.limits.start_new_file():
+            logger.info(f"Skipping {self.file_path} - global limits reached")
             return
             
         try:
             # Parse the content into an AST
             tree = self.parser.parse(bytes(self.content, "utf8"))
             root_node = tree.root_node
-
+            
             logger.info(f"Parsed AST with root node type: {root_node.type}")
-
-            # Pre-analysis: check if we need sampling
-            if self._should_sample_file():
-                logger.info(f"Large file detected, using sampling strategy")
-
-            # Extract functions with limits
+            
+            # Extract functions
             self._extract_functions(root_node)
-
-            # Extract call relationships with limits
-            if not self.analysis_truncated and not self.global_counter.should_stop():
+            
+            # Extract call relationships (only if we haven't hit limits)
+            if not self.limits.should_stop():
                 self._extract_call_relationships(root_node)
-
-            logger.info(
-                f"Analysis complete: {len(self.functions)} functions, "
-                f"{len(self.call_relationships)} relationships, "
-                f"global_nodes_processed={self.global_counter.nodes_processed}, truncated={self.analysis_truncated}"
-            )
-
+            
+            logger.info(f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships, {self.limits.nodes_processed} nodes processed")
+            
         except Exception as e:
-            logger.error(
-                f"Error analyzing Rust file {self.file_path}: {e}", exc_info=True
-            )
+            logger.error(f"Error analyzing Rust file {self.file_path}: {e}", exc_info=True)
 
-    def _should_sample_file(self) -> bool:
-        """Determine if we should use sampling for this file."""
-        line_count = len(self.content.splitlines())
-        return self.limits.sample_large_files and line_count > 2000
+
 
     def _check_limits(self) -> bool:
         """Check if we've hit analysis limits."""
-        import time
-        
-        # Check global node limit first (most important)
-        if self.global_counter.should_stop():
-            logger.warning(f"Hit global node limit ({self.global_counter.max_nodes}), truncating analysis")
-            self.analysis_truncated = True
-            return False
-        
-        # Check time limit
-        if time.time() - self.start_time > self.max_analysis_time:
-            logger.warning(f"Hit time limit ({self.max_analysis_time}s), truncating analysis")
-            self.analysis_truncated = True
-            return False
-        
-        if self.current_depth >= self.limits.max_depth:
-            logger.warning(f"Hit depth limit ({self.limits.max_depth}), skipping deeper nodes")
-            return False
-            
-        if len(self.functions) >= self.limits.max_functions:
-            logger.warning(f"Hit function limit ({self.limits.max_functions}), truncating analysis")
-            self.analysis_truncated = True
-            return False
-            
-        return True
+        return not self.limits.should_stop()
 
     def _extract_functions(self, node) -> None:
         """Extract all function definitions from the AST."""
         self._traverse_for_functions(node, depth=0)
-        
-        # Sort by priority: public functions first, then by line number
-        if self.limits.prioritize_public:
-            self.functions.sort(key=lambda f: (not self._is_likely_public(f), f.line_start))
-        else:
-            self.functions.sort(key=lambda f: f.line_start)
-        
-        # Apply sampling if needed and we have too many functions
-        if (self._should_sample_file() and 
-            len(self.functions) > self.limits.max_functions):
-            self._apply_function_sampling()
 
     def _traverse_for_functions(self, node, depth: int = 0) -> None:
         """Recursively traverse AST nodes to find functions."""
-        if not self._check_limits():
+        if self.limits.should_stop():
             return
-            
-        # Increment global counter and check limit
-        if self.global_counter.increment():
-            self.analysis_truncated = True
-            return
-            
-        self.current_depth = max(self.current_depth, depth)
 
         # Handle different function types
         if node.type == "function_item":
             func = self._extract_function_item(node)
-            if func and self._should_include_function_optimized(func):
-                self.functions.append(func)
+            if func and self._should_include_function(func):
+                # Check global limits before adding function
+                if self.limits.can_add_function():
+                    self.functions.append(func)
+                    # Track in global counter
+                    if self.limits.add_function():
+                        return  # Global limit reached, stop analysis
+                else:
+                    return  # Can't add more functions, stop analysis
 
         elif node.type == "impl_item":
             # Extract methods from impl blocks
@@ -198,43 +125,35 @@ class TreeSitterRustAnalyzer:
                     for method_child in child.children:
                         if method_child.type == "function_item":
                             func = self._extract_method_from_impl(method_child, node)
-                            if func and self._should_include_function_optimized(func):
-                                self.functions.append(func)
+                            if func and self._should_include_function(func):
+                                # Check global limits before adding function
+                                if self.limits.can_add_function():
+                                    self.functions.append(func)
+                                    # Track in global counter
+                                    if self.limits.add_function():
+                                        return  # Global limit reached, stop analysis
+                                else:
+                                    return  # Can't add more functions, stop analysis
 
         elif node.type == "closure_expression" and depth < 10:  # Limit closure depth
             func = self._extract_closure(node)
-            if func and self._should_include_function_optimized(func):
-                self.functions.append(func)
+            if func and self._should_include_function(func):
+                # Check global limits before adding function
+                if self.limits.can_add_function():
+                    self.functions.append(func)
+                    # Track in global counter
+                    if self.limits.add_function():
+                        return  # Global limit reached, stop analysis
+                else:
+                    return  # Can't add more functions, stop analysis
 
-        # Recursively process child nodes with depth limit
-        if depth < self.limits.max_depth:
-            for child in node.children:
-                self._traverse_for_functions(child, depth + 1)
+        # Recursively process child nodes
+        for child in node.children:
+            self._traverse_for_functions(child, depth + 1)
+            if self.limits.should_stop():
+                break
 
-    def _should_include_function_optimized(self, func: Function) -> bool:
-        """Enhanced function inclusion logic with optimization focus."""
-        if not func:
-            return False
-            
-        # Always include if we're not at limits yet
-        if len(self.functions) < self.limits.max_functions // 2:
-            return self._should_include_function(func)
-        
-        # Prioritize public functions
-        if self.limits.prioritize_public and self._is_likely_public(func):
-            return self._should_include_function(func)
-        
-        # Skip very large functions (likely generated code)
-        if (func.line_end and func.line_start and 
-            func.line_end - func.line_start > self.limits.max_function_size):
-            logger.debug(f"Skipping large function: {func.name} ({func.line_end - func.line_start} lines)")
-            return False
-        
-        # Skip obvious trivial functions
-        if self._is_trivial_function(func):
-            return False
-            
-        return self._should_include_function(func)
+
 
     def _is_likely_public(self, func: Function) -> bool:
         """Determine if a function is likely public (part of the API)."""
@@ -645,24 +564,28 @@ class TreeSitterRustAnalyzer:
 
     def _traverse_for_calls(self, node, func_ranges: dict, depth: int = 0) -> None:
         """Recursively find function calls with limits."""
-        if self.global_counter.should_stop():
-            return
-            
-        if depth >= self.limits.max_depth:
+        if self.limits.should_stop():
             return
             
         # Increment global counter
-        if self.global_counter.increment():
+        if self.limits.increment():
             return
         
         if node.type == "call_expression":
             call_info = self._extract_call_from_node(node, func_ranges)
             if call_info:
-                self.call_relationships.append(call_info)
+                # Check global limits before adding relationship
+                if self.limits.can_add_relationship():
+                    self.call_relationships.append(call_info)
+                    # Track in global counter
+                    if self.limits.add_relationship():
+                        return  # Global limit reached, stop analysis
+                else:
+                    return  # Can't add more relationships, stop analysis
 
         for child in node.children:
             self._traverse_for_calls(child, func_ranges, depth + 1)
-            if self.global_counter.should_stop():
+            if self.limits.should_stop():
                 break
 
     def _extract_call_from_node(
@@ -813,17 +736,14 @@ class TreeSitterRustAnalyzer:
 
 # Integration functions
 def analyze_rust_file_treesitter(
-    file_path: str, content: str, limits: Optional[AnalysisLimits] = None,
-    global_counter: Optional[GlobalNodeCounter] = None
+    file_path: str, content: str, limits: Optional[AnalysisLimits] = None
 ) -> tuple[List[Function], List[CallRelationship]]:
     """Analyze a Rust file using tree-sitter with configurable limits."""
     try:
         logger.info(f"Tree-sitter Rust analysis for {file_path}")
-        analyzer = TreeSitterRustAnalyzer(file_path, content, limits, global_counter)
+        analyzer = TreeSitterRustAnalyzer(file_path, content, limits)
         analyzer.analyze()
-        logger.info(
-            f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls"
-        )
+        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed")
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
         logger.error(
@@ -832,27 +752,4 @@ def analyze_rust_file_treesitter(
         return [], []
 
 
-def create_conservative_limits() -> AnalysisLimits:
-    """Create conservative limits for very large codebases."""
-    return AnalysisLimits(
-        max_nodes=2000,
-        max_depth=30,
-        max_functions=500,
-        max_function_size=200,
-        prioritize_public=True,
-        sample_large_files=True,
-        sample_ratio=0.2
-    )
 
-
-def create_aggressive_limits() -> AnalysisLimits:
-    """Create very aggressive limits for massive codebases."""
-    return AnalysisLimits(
-        max_nodes=1000,
-        max_depth=20,
-        max_functions=200,
-        max_function_size=100,
-        prioritize_public=True,
-        sample_large_files=True,
-        sample_ratio=0.1
-    )

@@ -10,7 +10,7 @@ import fnmatch
 import json
 from pathlib import Path
 from typing import Dict, List, Optional, Union
-from utils.patterns import DEFAULT_IGNORE_PATTERNS, DEFAULT_INCLUDE_PATTERNS
+from gitprobe.utils.patterns import DEFAULT_IGNORE_PATTERNS, DEFAULT_INCLUDE_PATTERNS
 
 class RepoAnalyzer:
     """
