@@ -56,11 +56,11 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         """Visit class definition and track current class context."""
         if self.limits.should_stop():
             return
-            
+
         # Count class definitions as meaningful nodes
         if self.limits.increment():
             return
-            
+
         self.current_class_name = node.name
         self.generic_visit(node)
         self.current_class_name = None
@@ -69,13 +69,13 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         """Helper to process both sync and async function definitions."""
         if self.limits.should_stop():
             return
-        
+
         # Count function definitions as meaningful nodes
         if self.limits.increment():
             return
-            
+
         self.current_function_name = node.name
-        
+
         # Extract function information
         function_obj = Function(
             name=node.name,
@@ -86,9 +86,9 @@ class PythonASTAnalyzer(ast.NodeVisitor):
             docstring=ast.get_docstring(node),
             is_method=self.current_class_name is not None,
             class_name=self.current_class_name,
-            code_snippet="\n".join(self.lines[node.lineno - 1:node.end_lineno or node.lineno])
+            code_snippet="\n".join(self.lines[node.lineno - 1 : node.end_lineno or node.lineno]),
         )
-        
+
         # Apply minimal filtering - only exclude obvious noise
         if self._should_include_function(function_obj):
             # Check global limits before adding function
@@ -99,18 +99,18 @@ class PythonASTAnalyzer(ast.NodeVisitor):
                     return  # Global limit reached, stop analysis
             else:
                 return  # Can't add more functions, stop analysis
-        
+
         self.generic_visit(node)
         self.current_function_name = None
 
     def _should_include_function(self, func: Function) -> bool:
         """Determine if a function should be included in analysis."""
         # Very minimal filtering - keep almost everything
-        
+
         # Skip functions that are clearly test fixtures or internal
-        if func.name.startswith('_test_') or func.name in ['setUp', 'tearDown']:
+        if func.name.startswith("_test_") or func.name in ["setUp", "tearDown"]:
             return False
-        
+
         # Keep everything else - let the graph cleanup handle disconnected functions
         return True
 
@@ -130,11 +130,11 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         """Visit function call nodes and record relationships."""
         if self.limits.should_stop():
             return
-        
+
         # Count function calls as meaningful nodes
         if self.limits.increment():
             return
-            
+
         if self.current_function_name:
             call_name = self._get_call_name(node.func)
             if call_name:
@@ -161,9 +161,22 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         """
         # Reduced builtin list - only exclude obvious globals
         PYTHON_BUILTINS = {
-            "print", "len", "str", "int", "float", "bool", "list", "dict",
-            "range", "enumerate", "zip", "isinstance", "hasattr", "open",
-            "super", "__import__"
+            "print",
+            "len",
+            "str",
+            "int",
+            "float",
+            "bool",
+            "list",
+            "dict",
+            "range",
+            "enumerate",
+            "zip",
+            "isinstance",
+            "hasattr",
+            "open",
+            "super",
+            "__import__",
         }
 
         if isinstance(node, ast.Name):
@@ -182,11 +195,11 @@ class PythonASTAnalyzer(ast.NodeVisitor):
         if not self.limits.start_new_file():
             logger.info(f"Skipping {self.file_path} - global limits reached")
             return
-            
+
         try:
             tree = ast.parse(self.content)
             self.visit(tree)
-            
+
             logger.info(
                 f"Python analysis complete for {self.file_path}: {len(self.functions)} functions, "
                 f"{len(self.call_relationships)} relationships, "
@@ -214,7 +227,7 @@ def analyze_python_file(
     """
     if limits is None:
         limits = create_python_limits()
-    
+
     analyzer = PythonASTAnalyzer(file_path, content, limits)
     analyzer.analyze()
-    return analyzer.functions, analyzer.call_relationships 
+    return analyzer.functions, analyzer.call_relationships

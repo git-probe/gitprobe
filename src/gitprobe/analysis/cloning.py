@@ -17,57 +17,57 @@ GIT_EXECUTABLE_PATH = shutil.which("git")
 def sanitize_github_url(github_url: str) -> str:
     """
     Sanitize GitHub URL to ensure proper format and remove extra path components.
-    
+
     Args:
         github_url: Raw GitHub URL or repository path
-        
+
     Returns:
         str: Sanitized GitHub URL suitable for cloning
     """
     # Remove leading/trailing whitespace
     url = github_url.strip()
-    
+
     # Remove protocol temporarily for easier parsing
-    protocol = 'https://'
-    if url.startswith('https://'):
+    protocol = "https://"
+    if url.startswith("https://"):
         url = url[8:]  # Remove https://
-    elif url.startswith('http://'):
-        url = url[7:]   # Remove http://
-        protocol = 'http://'
-    
+    elif url.startswith("http://"):
+        url = url[7:]  # Remove http://
+        protocol = "http://"
+
     # Remove leading www. if present
-    if url.startswith('www.'):
+    if url.startswith("www."):
         url = url[4:]
-    
+
     # Handle different formats
-    parts = url.split('/')
-    
-    if url.startswith('github.com/'):
+    parts = url.split("/")
+
+    if url.startswith("github.com/"):
         # Format: github.com/owner/repo/... or github.com/owner/repo
-        url_parts = url.split('/')
+        url_parts = url.split("/")
         if len(url_parts) >= 3:
             owner = url_parts[1]
             repo = url_parts[2]
         else:
             # Malformed, return original
             return github_url
-    elif '/' in url and not url.startswith('github.com'):
+    elif "/" in url and not url.startswith("github.com"):
         # Format: owner/repo/... or owner/repo
-        url_parts = url.split('/')
+        url_parts = url.split("/")
         if len(url_parts) >= 2:
             owner = url_parts[0]
             repo = url_parts[1]
         else:
-            # Malformed, return original 
+            # Malformed, return original
             return github_url
     else:
         # Single string, assume it's a repo name with no owner
         return github_url
-    
+
     # Remove .git suffix if present
-    if repo.endswith('.git'):
+    if repo.endswith(".git"):
         repo = repo[:-4]
-    
+
     # Construct final URL
     return f"{protocol}github.com/{owner}/{repo}"
 
@@ -92,7 +92,7 @@ def clone_repository(github_url: str) -> str:
 
     # Sanitize the GitHub URL
     sanitized_url = sanitize_github_url(github_url)
-    
+
     temp_dir = tempfile.mkdtemp(prefix="gitprobe_")
 
     try:
@@ -148,15 +148,11 @@ def clone_repository(github_url: str) -> str:
                 )
 
                 # Create sparse-checkout file to exclude problematic paths
-                sparse_checkout_path = os.path.join(
-                    temp_dir, ".git", "info", "sparse-checkout"
-                )
+                sparse_checkout_path = os.path.join(temp_dir, ".git", "info", "sparse-checkout")
                 os.makedirs(os.path.dirname(sparse_checkout_path), exist_ok=True)
                 with open(sparse_checkout_path, "w") as f:
                     f.write("*\n")
-                    f.write(
-                        "!**/tests/**/CvnF9nAXfESwhrtdkjGhX2wAkKHzwr8N2rjExPK8eZYS/**\n"
-                    )
+                    f.write("!**/tests/**/CvnF9nAXfESwhrtdkjGhX2wAkKHzwr8N2rjExPK8eZYS/**\n")
                     f.write(
                         "!**/0x0000000000000000000000000000000000000000000000000000000000000002/**\n"
                     )
@@ -244,9 +240,7 @@ def cleanup_repository_safe(repo_dir: str) -> bool:
                 shutil.rmtree(repo_dir)
             return True
         except Exception as retry_e:
-            print(
-                f"⚠️ Warning: Failed to cleanup {repo_dir} after retry: {str(retry_e)}"
-            )
+            print(f"⚠️ Warning: Failed to cleanup {repo_dir} after retry: {str(retry_e)}")
             return False
     except Exception as e:
         print(f"⚠️ Warning: Failed to cleanup {repo_dir}: {str(e)}")

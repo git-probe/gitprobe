@@ -1,6 +1,7 @@
 import logging
 import sys
 
+
 def setup_logging():
     """
     Set up basic logging configuration.
@@ -11,5 +12,6 @@ def setup_logging():
         stream=sys.stdout,
     )
 
+
 # You can also get a logger instance to be used across the application
-logger = logging.getLogger("gitprobe") 
+logger = logging.getLogger("gitprobe")

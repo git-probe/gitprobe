@@ -12,6 +12,7 @@ from pathlib import Path
 
 try:
     from tree_sitter_languages import get_language, get_parser
+
     TREE_SITTER_LANGUAGES_AVAILABLE = True
 except ImportError:
     TREE_SITTER_LANGUAGES_AVAILABLE = False
@@ -29,7 +30,13 @@ logger = logging.getLogger(__name__)
 class TreeSitterCAnalyzer:
     """C/C++ analyzer using tree-sitter for proper AST parsing."""
 
-    def __init__(self, file_path: str, content: str, language: str = "c", limits: Optional[AnalysisLimits] = None):
+    def __init__(
+        self,
+        file_path: str,
+        content: str,
+        language: str = "c",
+        limits: Optional[AnalysisLimits] = None,
+    ):
         self.file_path = str(file_path)  # Ensure it's always a string
         self.content = content
         self.language = language.lower()
@@ -39,9 +46,13 @@ class TreeSitterCAnalyzer:
         self.limits = limits or create_c_cpp_limits()
 
         # Determine if this is C++ based on file extension or language parameter
-        is_cpp = (self.language == "cpp" or self.language == "c++" or 
-                 Path(file_path).suffix.lower() in ['.cpp', '.cc', '.cxx', '.c++', '.hpp', '.hxx', '.h++'])
-        
+        is_cpp = (
+            self.language == "cpp"
+            or self.language == "c++"
+            or Path(file_path).suffix.lower()
+            in [".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hxx", ".h++"]
+        )
+
         # Initialize tree-sitter
         if TREE_SITTER_LANGUAGES_AVAILABLE:
             if is_cpp:
@@ -58,7 +69,9 @@ class TreeSitterCAnalyzer:
                 self.language_obj = tree_sitter.Language(tree_sitter_c.language())
                 self.parser = tree_sitter.Parser(self.language_obj)
 
-        logger.info(f"TreeSitterCAnalyzer initialized for {file_path} ({self.language.upper()}) with limits: {self.limits}")
+        logger.info(
+            f"TreeSitterCAnalyzer initialized for {file_path} ({self.language.upper()}) with limits: {self.limits}"
+        )
 
     def analyze(self) -> None:
         """Analyze C/C++ code using tree-sitter."""
@@ -89,7 +102,7 @@ class TreeSitterCAnalyzer:
         except Exception as e:
             logger.error(
                 f"Tree-sitter {self.language.upper()} analysis failed for {self.file_path}: {e}",
-                exc_info=True
+                exc_info=True,
             )
 
     def _extract_functions(self, node):
@@ -207,9 +220,7 @@ class TreeSitterCAnalyzer:
 
             # Get code snippet (usually just the declaration)
             code_snippet = (
-                self._get_node_text(node.parent)
-                if node.parent
-                else self._get_node_text(node)
+                self._get_node_text(node.parent) if node.parent else self._get_node_text(node)
             )
 
             return Function(
@@ -243,9 +254,7 @@ class TreeSitterCAnalyzer:
                 if node.type == "destructor_definition":
                     destructor_name = self._find_child_by_type(node, "destructor_name")
                     if destructor_name:
-                        identifier = self._find_child_by_type(
-                            destructor_name, "identifier"
-                        )
+                        identifier = self._find_child_by_type(destructor_name, "identifier")
 
                 if not identifier:
                     return None
@@ -351,9 +360,7 @@ class TreeSitterCAnalyzer:
 
             if callee_name and not self._is_builtin_function(callee_name):
                 # Find the containing function
-                containing_func = self._find_containing_function(
-                    node.start_point[0] + 1
-                )
+                containing_func = self._find_containing_function(node.start_point[0] + 1)
                 if containing_func and containing_func.name != callee_name:
                     call_line = node.start_point[0] + 1
 
@@ -405,9 +412,22 @@ class TreeSitterCAnalyzer:
     def _is_builtin_function(self, name: str) -> bool:
         """Check if function name is a C/C++ built-in."""
         builtins = {
-            'printf', 'scanf', 'malloc', 'free', 'calloc', 'realloc',
-            'strlen', 'strcpy', 'strcmp', 'strcat', 'memcpy', 'memset',
-            'exit', 'abort', 'assert', 'sizeof'
+            "printf",
+            "scanf",
+            "malloc",
+            "free",
+            "calloc",
+            "realloc",
+            "strlen",
+            "strcpy",
+            "strcmp",
+            "strcat",
+            "memcpy",
+            "memset",
+            "exit",
+            "abort",
+            "assert",
+            "sizeof",
         }
         return name in builtins
 
@@ -443,7 +463,9 @@ def analyze_c_file_treesitter(
             limits = create_c_cpp_limits()
         analyzer = TreeSitterCAnalyzer(file_path, content, language="c", limits=limits)
         analyzer.analyze()
-        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed")
+        logger.info(
+            f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed"
+        )
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
         logger.error(f"Error in tree-sitter C analysis for {file_path}: {e}", exc_info=True)
@@ -470,7 +492,9 @@ def analyze_cpp_file_treesitter(
             limits = create_c_cpp_limits()
         analyzer = TreeSitterCAnalyzer(file_path, content, language="cpp", limits=limits)
         analyzer.analyze()
-        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed")
+        logger.info(
+            f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed"
+        )
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
         logger.error(f"Error in tree-sitter C++ analysis for {file_path}: {e}", exc_info=True)

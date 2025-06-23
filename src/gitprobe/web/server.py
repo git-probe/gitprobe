@@ -24,17 +24,17 @@ class AnalyzeRequest(BaseModel):
     include_patterns: Optional[List[str]] = None
     exclude_patterns: Optional[List[str]] = None
 
-    @field_validator('github_url')
+    @field_validator("github_url")
     @classmethod
     def sanitize_url(cls, v):
         if not v:
             raise ValueError("GitHub URL is required")
-        
+
         sanitized = sanitize_github_url(v)
-        
-        if 'github.com' not in sanitized:
+
+        if "github.com" not in sanitized:
             raise ValueError("Must be a valid GitHub URL")
-            
+
         return sanitized
 
 
@@ -94,6 +94,7 @@ async def health_check():
 def cli_main():
     """CLI entry point for gitprobe-server command."""
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
 
 

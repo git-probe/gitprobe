@@ -8,6 +8,7 @@ from pathlib import Path
 
 try:
     from tree_sitter_languages import get_language, get_parser
+
     TREE_SITTER_LANGUAGES_AVAILABLE = True
 except ImportError:
     TREE_SITTER_LANGUAGES_AVAILABLE = False
@@ -22,24 +23,26 @@ logger = logging.getLogger(__name__)
 
 class GlobalNodeCounter:
     """Shared counter for tracking nodes across all files of the same language."""
-    
+
     def __init__(self, max_nodes: int = 800):
         self.max_nodes = max_nodes
         self.nodes_processed = 0
         self.limit_reached = False
-    
+
     def increment(self) -> bool:
         """Increment counter and return True if limit reached."""
         if self.limit_reached:
             return True
-        
+
         self.nodes_processed += 1
         if self.nodes_processed >= self.max_nodes:
             self.limit_reached = True
-            logger.warning(f"Global Rust node limit of {self.max_nodes} reached. Stopping all Rust analysis.")
+            logger.warning(
+                f"Global Rust node limit of {self.max_nodes} reached. Stopping all Rust analysis."
+            )
             return True
         return False
-    
+
     def should_stop(self) -> bool:
         """Check if analysis should stop."""
         return self.limit_reached
@@ -47,14 +50,14 @@ class GlobalNodeCounter:
 
 class TreeSitterRustAnalyzer:
     """Rust analyzer using tree-sitter for proper AST parsing."""
-    
+
     def __init__(self, file_path: str, content: str, limits: Optional[AnalysisLimits] = None):
         self.file_path = Path(file_path)
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
         self.limits = limits or create_rust_limits()
-        
+
         # Initialize tree-sitter
         if TREE_SITTER_LANGUAGES_AVAILABLE:
             self.rust_language = get_language("rust")
@@ -62,35 +65,37 @@ class TreeSitterRustAnalyzer:
         else:
             self.rust_language = tree_sitter.Language(tree_sitter_rust.language())
             self.parser = tree_sitter.Parser(self.rust_language)
-        
-        logger.info(f"TreeSitterRustAnalyzer initialized for {file_path} with limits: {self.limits}")
-    
+
+        logger.info(
+            f"TreeSitterRustAnalyzer initialized for {file_path} with limits: {self.limits}"
+        )
+
     def analyze(self) -> None:
         """Analyze the Rust content and extract functions and call relationships."""
         if not self.limits.start_new_file():
             logger.info(f"Skipping {self.file_path} - global limits reached")
             return
-            
+
         try:
             # Parse the content into an AST
             tree = self.parser.parse(bytes(self.content, "utf8"))
             root_node = tree.root_node
-            
+
             logger.info(f"Parsed AST with root node type: {root_node.type}")
-            
+
             # Extract functions
             self._extract_functions(root_node)
-            
+
             # Extract call relationships (only if we haven't hit limits)
             if not self.limits.should_stop():
                 self._extract_call_relationships(root_node)
-            
-            logger.info(f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships, {self.limits.nodes_processed} nodes processed")
-            
+
+            logger.info(
+                f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships, {self.limits.nodes_processed} nodes processed"
+            )
+
         except Exception as e:
             logger.error(f"Error analyzing Rust file {self.file_path}: {e}", exc_info=True)
-
-
 
     def _check_limits(self) -> bool:
         """Check if we've hit analysis limits."""
@@ -153,175 +158,177 @@ class TreeSitterRustAnalyzer:
             if self.limits.should_stop():
                 break
 
-
-
     def _is_likely_public(self, func: Function) -> bool:
         """Determine if a function is likely public (part of the API)."""
         # Check if function name suggests it's public
-        public_indicators = ['pub ', 'main', 'new', 'from_', 'into_', 'as_']
-        
+        public_indicators = ["pub ", "main", "new", "from_", "into_", "as_"]
+
         # Check the code snippet for pub keyword
-        if func.code_snippet and 'pub ' in func.code_snippet:
+        if func.code_snippet and "pub " in func.code_snippet:
             return True
-            
+
         # Main functions are always important
-        if func.name == 'main':
+        if func.name == "main":
             return True
-            
+
         # Constructor-like functions
-        if func.name in ['new', 'create', 'build', 'from', 'into']:
+        if func.name in ["new", "create", "build", "from", "into"]:
             return True
-            
+
         # Test functions are less important unless we're analyzing tests
-        if func.name.startswith('test_') or 'test' in func.name.lower():
+        if func.name.startswith("test_") or "test" in func.name.lower():
             return False
-            
+
         return False
 
     def _is_trivial_function(self, func: Function) -> bool:
         """Check if function is trivial (getter, setter, simple wrapper)."""
         if not func.code_snippet:
             return False
-            
-        lines = func.code_snippet.strip().split('\n')
-        
+
+        lines = func.code_snippet.strip().split("\n")
+
         # Single line functions might be trivial
         if len(lines) <= 2:
             # But keep important ones
-            if func.name in ['main', 'new'] or self._is_likely_public(func):
+            if func.name in ["main", "new"] or self._is_likely_public(func):
                 return False
             return True
-            
+
         # Simple getter patterns
-        getter_patterns = ['self.', 'return ', '&self', '-> &']
+        getter_patterns = ["self.", "return ", "&self", "-> &"]
         if any(pattern in func.code_snippet for pattern in getter_patterns):
             if len(lines) <= 3:
                 return True
-                
+
         return False
 
     def _apply_function_sampling(self) -> None:
         """Apply intelligent sampling to reduce function count."""
         original_count = len(self.functions)
         target_count = int(self.limits.max_functions * self.limits.sample_ratio)
-        
+
         if original_count <= target_count:
             return
-            
+
         # Separate functions by priority
         high_priority = []
         medium_priority = []
         low_priority = []
-        
+
         for func in self.functions:
-            if self._is_likely_public(func) or func.name == 'main':
+            if self._is_likely_public(func) or func.name == "main":
                 high_priority.append(func)
             elif self._is_trivial_function(func):
                 low_priority.append(func)
             else:
                 medium_priority.append(func)
-        
+
         # Keep all high priority, sample medium, skip most low priority
         sampled = high_priority.copy()
-        
+
         # Add medium priority functions
         medium_slots = max(0, target_count - len(high_priority))
         if medium_slots > 0 and medium_priority:
             step = max(1, len(medium_priority) // medium_slots)
             sampled.extend(medium_priority[::step][:medium_slots])
-        
+
         # Add a few low priority if we have room
         low_slots = max(0, target_count - len(sampled))
         if low_slots > 0 and low_priority:
             step = max(1, len(low_priority) // low_slots)
             sampled.extend(low_priority[::step][:low_slots])
-        
+
         self.functions = sampled[:target_count]
-        logger.info(f"Sampled functions: {original_count} -> {len(self.functions)} "
-                   f"(high: {len(high_priority)}, medium: {len([f for f in sampled if f in medium_priority])}, "
-                   f"low: {len([f for f in sampled if f in low_priority])})")
+        logger.info(
+            f"Sampled functions: {original_count} -> {len(self.functions)} "
+            f"(high: {len(high_priority)}, medium: {len([f for f in sampled if f in medium_priority])}, "
+            f"low: {len([f for f in sampled if f in low_priority])})"
+        )
 
     def _is_important_disconnected_function(self, func: Function) -> bool:
         """Check if a disconnected function is still architecturally important."""
         # Always keep entry points
-        if func.name == 'main':
+        if func.name == "main":
             return True
-            
+
         # Keep public APIs
         if self._is_likely_public(func):
             return True
-            
+
         # Keep constructors and factory functions
-        if func.name in ['new', 'create', 'build', 'from', 'into', 'default']:
+        if func.name in ["new", "create", "build", "from", "into", "default"]:
             return True
-            
+
         # Keep trait implementations (common patterns)
-        if func.name in ['fmt', 'clone', 'debug', 'display', 'drop']:
+        if func.name in ["fmt", "clone", "debug", "display", "drop"]:
             return True
-            
+
         # Keep test entry points if analyzing tests
-        if func.name.startswith('test_') and len(func.name) > 10:  # Meaningful test names
+        if func.name.startswith("test_") and len(func.name) > 10:  # Meaningful test names
             return True
-            
+
         return False
 
     def _has_ast_context(self, func: Function, root_node) -> bool:
         """Use tree-sitter to check if function has meaningful AST context."""
         func_name = func.name
-        
+
         # Skip closures - they're always contextual if we found them
-        if func_name.startswith('closure_line_'):
+        if func_name.startswith("closure_line_"):
             return True
-        
+
         # Check for various types of references in the AST
         contexts_found = []
-        
+
         # Look for the function being referenced in different contexts
         self._find_function_references(root_node, func_name, contexts_found)
-        
+
         # Function has context if it's referenced in meaningful ways
         meaningful_contexts = {
-            'attribute',      # #[test], #[derive], etc.
-            'use_declaration', # use statements
-            'macro_invocation', # Used in macros
-            'field_expression', # obj.func references
-            'path_expression',  # module::func references
-            'type_arguments',   # Generic type usage
-            'struct_expression', # Struct construction
-            'enum_variant',     # Enum variant
-            'trait_impl',       # Trait implementation
+            "attribute",  # #[test], #[derive], etc.
+            "use_declaration",  # use statements
+            "macro_invocation",  # Used in macros
+            "field_expression",  # obj.func references
+            "path_expression",  # module::func references
+            "type_arguments",  # Generic type usage
+            "struct_expression",  # Struct construction
+            "enum_variant",  # Enum variant
+            "trait_impl",  # Trait implementation
         }
-        
+
         has_meaningful_context = any(ctx in meaningful_contexts for ctx in contexts_found)
-        
+
         if has_meaningful_context:
             logger.debug(f"Function {func_name} has AST context: {contexts_found}")
             return True
-            
+
         # If no meaningful context found, it's truly isolated
         return False
 
-    def _find_function_references(self, node, func_name: str, contexts_found: list, depth: int = 0) -> None:
+    def _find_function_references(
+        self, node, func_name: str, contexts_found: list, depth: int = 0
+    ) -> None:
         """Recursively find references to a function in the AST."""
         if depth > 20:  # Prevent deep recursion
             return
-            
+
         # Check if this node contains our function name
-        if hasattr(node, 'text') or hasattr(node, 'type'):
-            node_text = self._get_node_text(node) if node.type == 'identifier' else ""
-            
+        if hasattr(node, "text") or hasattr(node, "type"):
+            node_text = self._get_node_text(node) if node.type == "identifier" else ""
+
             if node_text == func_name:
                 # Found a reference, record the parent context
                 parent_type = node.parent.type if node.parent else "root"
                 if parent_type not in contexts_found:
                     contexts_found.append(parent_type)
-                
+
                 # Also check grandparent for more context
                 if node.parent and node.parent.parent:
                     grandparent_type = node.parent.parent.type
                     if grandparent_type not in contexts_found:
                         contexts_found.append(grandparent_type)
-        
+
         # Recursively check children (but limit depth)
         for child in node.children:
             self._find_function_references(child, func_name, contexts_found, depth + 1)
@@ -330,63 +337,65 @@ class TreeSitterRustAnalyzer:
         """Keep only functions in the largest connected components of the call graph."""
         if not self.call_relationships:
             return
-            
+
         # Build adjacency graph
         graph = {}
         for rel in self.call_relationships:
-            caller = rel.caller.split(':')[-1] if ':' in rel.caller else rel.caller
-            callee = rel.callee.split(':')[-1] if ':' in rel.callee else rel.callee
-            
+            caller = rel.caller.split(":")[-1] if ":" in rel.caller else rel.caller
+            callee = rel.callee.split(":")[-1] if ":" in rel.callee else rel.callee
+
             if caller not in graph:
                 graph[caller] = set()
             if callee not in graph:
                 graph[callee] = set()
-                
+
             graph[caller].add(callee)
             graph[callee].add(caller)  # Treat as undirected for component analysis
-        
+
         # Find connected components using DFS
         visited = set()
         components = []
-        
+
         def dfs(node, component):
             visited.add(node)
             component.add(node)
             for neighbor in graph.get(node, set()):
                 if neighbor not in visited:
                     dfs(neighbor, component)
-        
+
         for node in graph:
             if node not in visited:
                 component = set()
                 dfs(node, component)
                 components.append(component)
-        
+
         # Sort components by size (largest first)
         components.sort(key=len, reverse=True)
-        
+
         if not components:
             return
-            
+
         # Keep functions from the largest 2-3 components
         max_components = min(3, len(components))
         keep_functions = set()
-        
+
         for i in range(max_components):
             keep_functions.update(components[i])
-            
+
         # Always keep main if it exists
         for func in self.functions:
-            if func.name == 'main':
+            if func.name == "main":
                 keep_functions.add(func.name)
-        
+
         # Filter functions to keep only those in selected components
         original_count = len(self.functions)
         self.functions = [f for f in self.functions if f.name in keep_functions]
-        
-        logger.info(f"Component analysis: kept {len(self.functions)} functions from {max_components} "
-                   f"largest components (sizes: {[len(c) for c in components[:max_components]]}), "
-                                      f"filtered {original_count - len(self.functions)} functions")
+
+        logger.info(
+            f"Component analysis: kept {len(self.functions)} functions from {max_components} "
+            f"largest components (sizes: {[len(c) for c in components[:max_components]]}), "
+            f"filtered {original_count - len(self.functions)} functions"
+        )
 
     def _extract_function_item(self, node) -> Optional[Function]:
         """Extract regular function: fn name() {}"""
@@ -566,11 +575,11 @@ class TreeSitterRustAnalyzer:
         """Recursively find function calls with limits."""
         if self.limits.should_stop():
             return
-            
+
         # Increment global counter
         if self.limits.increment():
             return
-        
+
         if node.type == "call_expression":
             call_info = self._extract_call_from_node(node, func_ranges)
             if call_info:
@@ -588,9 +597,7 @@ class TreeSitterRustAnalyzer:
             if self.limits.should_stop():
                 break
 
-    def _extract_call_from_node(
-        self, node, func_ranges: dict
-    ) -> Optional[CallRelationship]:
+    def _extract_call_from_node(self, node, func_ranges: dict) -> Optional[CallRelationship]:
         """Extract call relationship from a call_expression node."""
         try:
             call_line = node.start_point[0] + 1
@@ -743,13 +750,10 @@ def analyze_rust_file_treesitter(
         logger.info(f"Tree-sitter Rust analysis for {file_path}")
         analyzer = TreeSitterRustAnalyzer(file_path, content, limits)
         analyzer.analyze()
-        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed")
+        logger.info(
+            f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed"
+        )
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
-        logger.error(
-            f"Error in tree-sitter Rust analysis for {file_path}: {e}", exc_info=True
-        )
+        logger.error(f"Error in tree-sitter Rust analysis for {file_path}: {e}", exc_info=True)
         return [], []
-
-
-

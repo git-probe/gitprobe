@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
+
 class Function(BaseModel):
     """A function found in the codebase"""
 
@@ -28,6 +29,7 @@ class CallRelationship(BaseModel):
     callee: str
     call_line: Optional[int] = None
     is_resolved: bool = False
+
 
 class Repository(BaseModel):
     """Basic repository information"""

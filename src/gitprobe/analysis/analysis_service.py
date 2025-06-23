@@ -68,32 +68,26 @@ class AnalysisService:
         try:
             logger.info(f"Starting full analysis of {github_url}")
 
-            # Step 1: Clone and validate repository
+
             temp_dir = self._clone_repository(github_url)
             repo_info = self._parse_repository_info(github_url)
 
-            # Step 2: Analyze file structure
-            logger.info("Analyzing repository file structure...")
-            structure_result = self._analyze_structure(
-                temp_dir, include_patterns, exclude_patterns
-            )
-            logger.info(
-                f"Found {structure_result['summary']['total_files']} files to analyze."
-            )
 
-            # Step 3: Multi-language call graph analysis
+            logger.info("Analyzing repository file structure...")
+            structure_result = self._analyze_structure(temp_dir, include_patterns, exclude_patterns)
+            logger.info(f"Found {structure_result['summary']['total_files']} files to analyze.")
+
+
             logger.info("Starting call graph analysis...")
-            call_graph_result = self._analyze_call_graph(
-                structure_result["file_tree"], temp_dir
-            )
+            call_graph_result = self._analyze_call_graph(structure_result["file_tree"], temp_dir)
             logger.info(
                 f"Call graph analysis complete. Found {call_graph_result['call_graph']['total_functions']} functions."
             )
 
-            # Step 3.5: Read README file
+
             readme_content = self._read_readme_file(temp_dir)
 
-            # Step 4: Build comprehensive result
+
             analysis_result = AnalysisResult(
                 repository=Repository(
                     url=repo_info["url"],
@@ -108,15 +102,12 @@ class AnalysisService:
                     **structure_result["summary"],
                     **call_graph_result["call_graph"],
                     "analysis_type": "full",
-                    "languages_analyzed": call_graph_result["call_graph"][
-                        "languages_found"
-                    ],
+                    "languages_analyzed": call_graph_result["call_graph"]["languages_found"],
                 },
                 visualization=call_graph_result["visualization"],
                 readme_content=readme_content,
             )
 
-            # Step 5: Cleanup
             logger.info(f"Cleaning up temporary repository directory: {temp_dir}")
             self._cleanup_repository(temp_dir)
 
@@ -127,7 +118,6 @@ class AnalysisService:
 
         except Exception as e:
             logger.error(f"Analysis failed: {str(e)}", exc_info=True)
-            # Ensure cleanup happens even on failure
             if "temp_dir" in locals() and Path(temp_dir).exists():
                 self._cleanup_repository(temp_dir)
             raise RuntimeError(f"Repository analysis failed: {str(e)}")
@@ -153,16 +143,11 @@ class AnalysisService:
         try:
             logger.info(f"Starting structure analysis of {github_url}")
 
-            # Step 1: Clone and validate repository
             temp_dir = self._clone_repository(github_url)
             repo_info = self._parse_repository_info(github_url)
 
-            # Step 2: Analyze file structure only
-            structure_result = self._analyze_structure(
-                temp_dir, include_patterns, exclude_patterns
-            )
+            structure_result = self._analyze_structure(temp_dir, include_patterns, exclude_patterns)
 
-            # Step 3: Build lightweight result
             result = {
                 "repository": repo_info,
                 "file_tree": structure_result["file_tree"],
@@ -172,7 +157,6 @@ class AnalysisService:
                 },
             }
 
-            # Step 4: Cleanup
             self._cleanup_repository(temp_dir)
 
             logger.info(
@@ -226,9 +210,7 @@ class AnalysisService:
         logger.info("No README file found in repository root.")
         return None
 
-    def _analyze_call_graph(
-        self, file_tree: Dict[str, Any], repo_dir: str
-    ) -> Dict[str, Any]:
+    def _analyze_call_graph(self, file_tree: Dict[str, Any], repo_dir: str) -> Dict[str, Any]:
         """
         Perform multi-language call graph analysis.
 
@@ -240,21 +222,14 @@ class AnalysisService:
         logger.info("Extracting code files from file tree...")
         code_files = self.call_graph_analyzer.extract_code_files(file_tree)
 
-        # Filter by supported languages (will expand as we add JS/TS support)
-        logger.info(
-            f"Found {len(code_files)} total code files. Filtering for supported languages."
-        )
+        logger.info(f"Found {len(code_files)} total code files. Filtering for supported languages.")
         supported_files = self._filter_supported_languages(code_files)
         logger.info(f"Analyzing {len(supported_files)} supported files.")
 
-        # Perform multi-language analysis
         result = self.call_graph_analyzer.analyze_code_files(supported_files, repo_dir)
 
-        # Add language-specific metadata
         result["call_graph"]["supported_languages"] = self._get_supported_languages()
-        result["call_graph"]["unsupported_files"] = len(code_files) - len(
-            supported_files
-        )
+        result["call_graph"]["unsupported_files"] = len(code_files) - len(supported_files)
 
         return result
 
@@ -301,7 +276,7 @@ class AnalysisService:
         self.cleanup_all()
 
 
-# Convenience functions for backward compatibility
+
 def analyze_repository(
     github_url: str, include_patterns=None, exclude_patterns=None
 ) -> tuple[AnalysisResult, None]:
@@ -312,9 +287,7 @@ def analyze_repository(
         tuple: (AnalysisResult, None) - None instead of temp_dir since cleanup is handled internally
     """
     service = AnalysisService()
-    result = service.analyze_repository_full(
-        github_url, include_patterns, exclude_patterns
-    )
+    result = service.analyze_repository_full(github_url, include_patterns, exclude_patterns)
     return result, None
 
 

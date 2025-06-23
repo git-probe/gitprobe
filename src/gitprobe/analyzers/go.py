@@ -8,6 +8,7 @@ from pathlib import Path
 
 try:
     from tree_sitter_languages import get_language, get_parser
+
     TREE_SITTER_LANGUAGES_AVAILABLE = True
 except ImportError:
     TREE_SITTER_LANGUAGES_AVAILABLE = False
@@ -22,14 +23,14 @@ logger = logging.getLogger(__name__)
 
 class TreeSitterGoAnalyzer:
     """Go analyzer using tree-sitter for proper AST parsing."""
-    
+
     def __init__(self, file_path: str, content: str, limits: Optional[AnalysisLimits] = None):
         self.file_path = Path(file_path)
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
         self.limits = limits or create_go_limits()
-        
+
         # Initialize tree-sitter
         if TREE_SITTER_LANGUAGES_AVAILABLE:
             self.go_language = get_language("go")
@@ -38,31 +39,33 @@ class TreeSitterGoAnalyzer:
             self.go_language = tree_sitter.Language(tree_sitter_go.language(), "go")
             self.parser = tree_sitter.Parser()
             self.parser.set_language(self.go_language)
-        
+
         logger.info(f"TreeSitterGoAnalyzer initialized for {file_path} with limits: {self.limits}")
-    
+
     def analyze(self) -> None:
         """Analyze the Go content and extract functions and call relationships."""
         if not self.limits.start_new_file():
             logger.info(f"Skipping {self.file_path} - global limits reached")
             return
-            
+
         try:
             # Parse the content into an AST
             tree = self.parser.parse(bytes(self.content, "utf8"))
             root_node = tree.root_node
-            
+
             logger.info(f"Parsed AST with root node type: {root_node.type}")
-            
+
             # Extract functions
             self._extract_functions(root_node)
-            
+
             # Extract call relationships (only if we haven't hit limits)
             if not self.limits.should_stop():
                 self._extract_call_relationships(root_node)
-            
-            logger.info(f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships, {self.limits.nodes_processed} nodes processed")
-            
+
+            logger.info(
+                f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships, {self.limits.nodes_processed} nodes processed"
+            )
+
         except Exception as e:
             logger.error(f"Error analyzing Go file {self.file_path}: {e}", exc_info=True)
 
@@ -222,10 +225,7 @@ class TreeSitterGoAnalyzer:
             return False
 
         # Skip anonymous functions that are too simple
-        if (
-            func.name.startswith("anonymous_func")
-            and func.line_end - func.line_start < 3
-        ):
+        if func.name.startswith("anonymous_func") and func.line_end - func.line_start < 3:
             logger.debug(f"Skipping simple anonymous function: {func.name}")
             return False
 
@@ -315,9 +315,7 @@ class TreeSitterGoAnalyzer:
             if self.limits.should_stop():
                 break
 
-    def _extract_call_from_node(
-        self, node, func_ranges: dict
-    ) -> Optional[CallRelationship]:
+    def _extract_call_from_node(self, node, func_ranges: dict) -> Optional[CallRelationship]:
         """Extract call relationship from a call_expression node."""
         try:
             call_line = node.start_point[0] + 1
@@ -452,10 +450,10 @@ def analyze_go_file_treesitter(
         logger.info(f"Tree-sitter Go analysis for {file_path}")
         analyzer = TreeSitterGoAnalyzer(file_path, content, limits)
         analyzer.analyze()
-        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed")
+        logger.info(
+            f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {analyzer.limits.nodes_processed} nodes processed"
+        )
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
-        logger.error(
-            f"Error in tree-sitter Go analysis for {file_path}: {e}", exc_info=True
-        )
+        logger.error(f"Error in tree-sitter Go analysis for {file_path}: {e}", exc_info=True)
         return [], []

@@ -11,6 +11,7 @@ from pathlib import Path
 
 try:
     from tree_sitter_languages import get_language, get_parser
+
     TREE_SITTER_LANGUAGES_AVAILABLE = True
 except ImportError:
     TREE_SITTER_LANGUAGES_AVAILABLE = False
@@ -26,14 +27,14 @@ logger = logging.getLogger(__name__)
 
 class TreeSitterJSAnalyzer:
     """JavaScript analyzer using tree-sitter for proper AST parsing."""
-    
+
     def __init__(self, file_path: str, content: str, limits: Optional[AnalysisLimits] = None):
         self.file_path = Path(file_path)
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
         self.limits = limits or create_javascript_limits()
-        
+
         # Initialize tree-sitter
         if TREE_SITTER_LANGUAGES_AVAILABLE:
             self.js_language = get_language("javascript")
@@ -41,44 +42,46 @@ class TreeSitterJSAnalyzer:
         else:
             self.js_language = tree_sitter.Language(tree_sitter_javascript.language())
             self.parser = tree_sitter.Parser(self.js_language)
-        
+
         logger.info(f"TreeSitterJSAnalyzer initialized for {file_path} with limits: {self.limits}")
-    
+
     def analyze(self) -> None:
         """Analyze the JavaScript content and extract functions and call relationships."""
         if not self.limits.start_new_file():
             logger.info(f"Skipping {self.file_path} - global limits reached")
             return
-            
+
         try:
             # Parse the content into an AST
             tree = self.parser.parse(bytes(self.content, "utf8"))
             root_node = tree.root_node
-            
+
             logger.info(f"Parsed AST with root node type: {root_node.type}")
-            
+
             # Extract functions
             self._extract_functions(root_node)
-            
+
             # Extract call relationships (only if we haven't hit limits)
             if not self.limits.should_stop():
                 self._extract_call_relationships(root_node)
-            
-            logger.info(f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships, {self.limits.nodes_processed} nodes processed")
-            
+
+            logger.info(
+                f"Analysis complete: {len(self.functions)} functions, {len(self.call_relationships)} relationships, {self.limits.nodes_processed} nodes processed"
+            )
+
         except Exception as e:
             logger.error(f"Error analyzing JavaScript file {self.file_path}: {e}", exc_info=True)
-    
+
     def _extract_functions(self, node) -> None:
         """Extract all function definitions from the AST."""
         self._traverse_for_functions(node)
         self.functions.sort(key=lambda f: f.line_start)
-    
+
     def _traverse_for_functions(self, node) -> None:
         """Recursively traverse AST nodes to find functions."""
-        
+
         # Handle different function types
-        if node.type == 'function_declaration':
+        if node.type == "function_declaration":
             func = self._extract_function_declaration(node)
             if func and self._should_include_function(func):
                 # Check global limits before adding function
@@ -89,8 +92,8 @@ class TreeSitterJSAnalyzer:
                         return  # Global limit reached, stop analysis
                 else:
                     return  # Can't add more functions, stop analysis
-        
-        elif node.type == 'export_statement':
+
+        elif node.type == "export_statement":
             func = self._extract_exported_function(node)
             if func and self._should_include_function(func):
                 # Check global limits before adding function
@@ -101,8 +104,8 @@ class TreeSitterJSAnalyzer:
                         return  # Global limit reached, stop analysis
                 else:
                     return  # Can't add more functions, stop analysis
-        
-        elif node.type == 'lexical_declaration':
+
+        elif node.type == "lexical_declaration":
             func = self._extract_arrow_function_from_declaration(node)
             if func and self._should_include_function(func):
                 # Check global limits before adding function
@@ -113,8 +116,8 @@ class TreeSitterJSAnalyzer:
                         return  # Global limit reached, stop analysis
                 else:
                     return  # Can't add more functions, stop analysis
-        
-        elif node.type == 'method_definition':
+
+        elif node.type == "method_definition":
             func = self._extract_method_definition(node)
             if func and self._should_include_function(func):
                 # Check global limits before adding function
@@ -125,8 +128,8 @@ class TreeSitterJSAnalyzer:
                         return  # Global limit reached, stop analysis
                 else:
                     return  # Can't add more functions, stop analysis
-        
-        elif node.type == 'pair':  # Object method shorthand: { method() {} }
+
+        elif node.type == "pair":  # Object method shorthand: { method() {} }
             func = self._extract_object_method(node)
             if func and self._should_include_function(func):
                 # Check global limits before adding function
@@ -137,8 +140,8 @@ class TreeSitterJSAnalyzer:
                         return  # Global limit reached, stop analysis
                 else:
                     return  # Can't add more functions, stop analysis
-        
-        elif node.type == 'assignment_expression':  # obj.method = function() {}
+
+        elif node.type == "assignment_expression":  # obj.method = function() {}
             func = self._extract_assignment_function(node)
             if func and self._should_include_function(func):
                 # Check global limits before adding function
@@ -149,27 +152,27 @@ class TreeSitterJSAnalyzer:
                         return  # Global limit reached, stop analysis
                 else:
                     return  # Can't add more functions, stop analysis
-        
+
         # Recursively process all child nodes (with limit checks)
         for child in node.children:
             if self.limits.should_stop():
                 break
             self._traverse_for_functions(child)
-    
+
     def _extract_function_declaration(self, node) -> Optional[Function]:
         """Extract regular function declaration: function name() {}"""
         try:
             # Find function name
-            name_node = self._find_child_by_type(node, 'identifier')
+            name_node = self._find_child_by_type(node, "identifier")
             if not name_node:
                 return None
-            
+
             func_name = self._get_node_text(name_node)
             line_start = node.start_point[0] + 1
             line_end = node.end_point[0] + 1
             parameters = self._extract_parameters(node)
             code_snippet = self._get_node_text(node)
-            
+
             return Function(
                 name=func_name,
                 file_path=str(self.file_path),
@@ -184,40 +187,42 @@ class TreeSitterJSAnalyzer:
         except Exception as e:
             logger.warning(f"Error extracting function declaration: {e}")
             return None
-    
+
     def _extract_exported_function(self, node) -> Optional[Function]:
         """Extract export function or export default function"""
         try:
             # Look for function_declaration within export_statement
-            func_decl = self._find_child_by_type(node, 'function_declaration')
+            func_decl = self._find_child_by_type(node, "function_declaration")
             if func_decl:
                 func = self._extract_function_declaration(func_decl)
                 if func:
                     # Check if it's export default without a name
                     export_text = self._get_node_text(node)
-                    if 'export default' in export_text and 'function (' in export_text:
-                        func.name = 'default'
+                    if "export default" in export_text and "function (" in export_text:
+                        func.name = "default"
                 return func
         except Exception as e:
             logger.warning(f"Error extracting exported function: {e}")
         return None
-    
+
     def _extract_arrow_function_from_declaration(self, node) -> Optional[Function]:
         """Extract arrow function or function expression from const/let/var declarations"""
         try:
             # Look for variable_declarator containing arrow_function or function_expression
             for child in node.children:
-                if child.type == 'variable_declarator':
-                    name_node = self._find_child_by_type(child, 'identifier')
-                    func_node = self._find_child_by_type(child, 'arrow_function') or self._find_child_by_type(child, 'function_expression')
-                    
+                if child.type == "variable_declarator":
+                    name_node = self._find_child_by_type(child, "identifier")
+                    func_node = self._find_child_by_type(
+                        child, "arrow_function"
+                    ) or self._find_child_by_type(child, "function_expression")
+
                     if name_node and func_node:
                         func_name = self._get_node_text(name_node)
                         line_start = func_node.start_point[0] + 1
                         line_end = func_node.end_point[0] + 1
                         parameters = self._extract_parameters(func_node)
                         code_snippet = self._get_node_text(child)  # Get full declaration
-                        
+
                         return Function(
                             name=func_name,
                             file_path=str(self.file_path),
@@ -232,22 +237,22 @@ class TreeSitterJSAnalyzer:
         except Exception as e:
             logger.warning(f"Error extracting function from declaration: {e}")
         return None
-    
+
     def _extract_method_definition(self, node) -> Optional[Function]:
         """Extract class method definition"""
         try:
             # Find method name
-            property_name = self._find_child_by_type(node, 'property_identifier')
+            property_name = self._find_child_by_type(node, "property_identifier")
             if not property_name:
                 return None
-            
+
             func_name = self._get_node_text(property_name)
             line_start = node.start_point[0] + 1
             line_end = node.end_point[0] + 1
             parameters = self._extract_parameters(node)
             code_snippet = self._get_node_text(node)
             class_name = self._find_containing_class_name(node)
-            
+
             return Function(
                 name=func_name,
                 file_path=str(self.file_path),
@@ -262,35 +267,35 @@ class TreeSitterJSAnalyzer:
         except Exception as e:
             logger.warning(f"Error extracting method definition: {e}")
             return None
-    
+
     def _should_include_function(self, func: Function) -> bool:
         """Determine if a function should be included in the analysis."""
         # Only filter out obvious non-functions
         excluded_names = {
-            'constructor',  # Keep it minimal - these are actual noise
+            "constructor",  # Keep it minimal - these are actual noise
         }
-        
+
         if func.name.lower() in excluded_names:
             logger.debug(f"Skipping excluded function: {func.name}")
             return False
-        
+
         # Remove the aggressive length filter - modern JS has many valid one-liners
         # if func.line_end - func.line_start < 2:
         #     logger.debug(f"Skipping short function: {func.name}")
         #     return False
-        
+
         return True
-    
+
     def _extract_parameters(self, node) -> List[str]:
         """Extract parameter names from a function node."""
         parameters = []
-        params_node = self._find_child_by_type(node, 'formal_parameters')
+        params_node = self._find_child_by_type(node, "formal_parameters")
         if params_node:
             for child in params_node.children:
-                if child.type == 'identifier':
+                if child.type == "identifier":
                     parameters.append(self._get_node_text(child))
         return parameters
-    
+
     def _extract_call_relationships(self, node) -> None:
         """Extract function call relationships from the AST."""
         # Build function range map
@@ -298,13 +303,13 @@ class TreeSitterJSAnalyzer:
         for func in self.functions:
             for line in range(func.line_start, func.line_end + 1):
                 func_ranges[line] = func
-        
+
         self._traverse_for_calls(node, func_ranges)
-    
+
     def _traverse_for_calls(self, node, func_ranges: dict) -> None:
         """Recursively find function calls."""
-        
-        if node.type == 'call_expression':
+
+        if node.type == "call_expression":
             call_info = self._extract_call_from_node(node, func_ranges)
             if call_info:
                 # Check global limits before adding relationship
@@ -315,26 +320,26 @@ class TreeSitterJSAnalyzer:
                         return  # Global limit reached, stop analysis
                 else:
                     return  # Can't add more relationships, stop analysis
-        
+
         for child in node.children:
             if self.limits.should_stop():
                 break
             self._traverse_for_calls(child, func_ranges)
-    
+
     def _extract_call_from_node(self, node, func_ranges: dict) -> Optional[CallRelationship]:
         """Extract call relationship from a call_expression node."""
         try:
             call_line = node.start_point[0] + 1
             caller_func = func_ranges.get(call_line)
-            
+
             # Only process calls that originate from within identified functions
             if not caller_func:
                 return None
-            
+
             callee_name = self._extract_callee_name(node)
             if not callee_name or self._is_builtin_function(callee_name):
                 return None
-            
+
             caller_id = f"{self.file_path}:{caller_func.name}"
             return CallRelationship(
                 caller=caller_id,
@@ -345,32 +350,40 @@ class TreeSitterJSAnalyzer:
         except Exception as e:
             logger.warning(f"Error extracting call relationship: {e}")
             return None
-    
+
     def _extract_callee_name(self, call_node) -> Optional[str]:
         """Extract the name of the called function."""
         if call_node.children:
             callee_node = call_node.children[0]
-            
-            if callee_node.type == 'identifier':
+
+            if callee_node.type == "identifier":
                 return self._get_node_text(callee_node)
-            elif callee_node.type == 'member_expression':
+            elif callee_node.type == "member_expression":
                 # For method calls like obj.method(), extract just 'method'
-                property_node = self._find_child_by_type(callee_node, 'property_identifier')
+                property_node = self._find_child_by_type(callee_node, "property_identifier")
                 if property_node:
                     return self._get_node_text(property_node)
         return None
-    
+
     def _is_builtin_function(self, name: str) -> bool:
         """Check if function name is a JavaScript built-in."""
         # Only exclude obvious global functions, not generic method names
         builtins = {
-            'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval',
-            'parseInt', 'parseFloat', 'isNaN', 'isFinite',
-            'encodeURIComponent', 'decodeURIComponent',
-            'eval', 'require'  # Node.js specific
+            "setTimeout",
+            "setInterval",
+            "clearTimeout",
+            "clearInterval",
+            "parseInt",
+            "parseFloat",
+            "isNaN",
+            "isFinite",
+            "encodeURIComponent",
+            "decodeURIComponent",
+            "eval",
+            "require",  # Node.js specific
         }
         return name in builtins
-    
+
     # Helper methods
     def _find_child_by_type(self, node, node_type: str):
         """Find first child node of specified type."""
@@ -378,19 +391,19 @@ class TreeSitterJSAnalyzer:
             if child.type == node_type:
                 return child
         return None
-    
+
     def _get_node_text(self, node) -> str:
         """Get the text content of a node."""
         start_byte = node.start_byte
         end_byte = node.end_byte
-        return self.content.encode('utf8')[start_byte:end_byte].decode('utf8')
-    
+        return self.content.encode("utf8")[start_byte:end_byte].decode("utf8")
+
     def _find_containing_class_name(self, method_node) -> Optional[str]:
         """Find the name of the class containing a method."""
         current = method_node.parent
         while current:
-            if current.type == 'class_declaration':
-                name_node = self._find_child_by_type(current, 'identifier')
+            if current.type == "class_declaration":
+                name_node = self._find_child_by_type(current, "identifier")
                 if name_node:
                     return self._get_node_text(name_node)
             current = current.parent
@@ -402,29 +415,29 @@ class TreeSitterJSAnalyzer:
             # Check if this pair contains a function
             key_node = None
             value_node = None
-            
+
             for child in node.children:
-                if child.type in ['property_identifier', 'identifier']:
+                if child.type in ["property_identifier", "identifier"]:
                     key_node = child
-                elif child.type in ['function_expression', 'arrow_function']:
+                elif child.type in ["function_expression", "arrow_function"]:
                     value_node = child
                 # Handle method shorthand syntax
-                elif child.type == 'function_signature':
+                elif child.type == "function_signature":
                     value_node = node  # The whole pair is the method
-            
+
             if key_node and value_node:
                 func_name = self._get_node_text(key_node)
                 line_start = value_node.start_point[0] + 1
                 line_end = value_node.end_point[0] + 1
-                
+
                 # For method shorthand, extract parameters from the pair node itself
                 if value_node == node:
                     parameters = self._extract_parameters(node)
                 else:
                     parameters = self._extract_parameters(value_node)
-                    
+
                 code_snippet = self._get_node_text(node)
-                
+
                 return Function(
                     name=func_name,
                     file_path=str(self.file_path),
@@ -439,20 +452,20 @@ class TreeSitterJSAnalyzer:
         except Exception as e:
             logger.warning(f"Error extracting object method: {e}")
         return None
-    
+
     def _extract_assignment_function(self, node) -> Optional[Function]:
         """Extract function from assignment: obj.method = function() {}"""
         try:
             # Look for assignment with function_expression/arrow_function on right side
             left_node = None
             right_node = None
-            
+
             for child in node.children:
-                if child.type in ['member_expression', 'identifier']:
+                if child.type in ["member_expression", "identifier"]:
                     left_node = child
-                elif child.type in ['function_expression', 'arrow_function']:
+                elif child.type in ["function_expression", "arrow_function"]:
                     right_node = child
-            
+
             if left_node and right_node:
                 # Extract function name from left side
                 func_name = self._extract_assignment_name(left_node)
@@ -461,7 +474,7 @@ class TreeSitterJSAnalyzer:
                     line_end = right_node.end_point[0] + 1
                     parameters = self._extract_parameters(right_node)
                     code_snippet = self._get_node_text(node)
-                    
+
                     return Function(
                         name=func_name,
                         file_path=str(self.file_path),
@@ -476,14 +489,14 @@ class TreeSitterJSAnalyzer:
         except Exception as e:
             logger.warning(f"Error extracting assignment function: {e}")
         return None
-    
+
     def _extract_assignment_name(self, node) -> Optional[str]:
         """Extract function name from assignment left side."""
-        if node.type == 'identifier':
+        if node.type == "identifier":
             return self._get_node_text(node)
-        elif node.type == 'member_expression':
+        elif node.type == "member_expression":
             # For obj.method, extract 'method'
-            property_node = self._find_child_by_type(node, 'property_identifier')
+            property_node = self._find_child_by_type(node, "property_identifier")
             if property_node:
                 return self._get_node_text(property_node)
         return None
@@ -491,14 +504,14 @@ class TreeSitterJSAnalyzer:
 
 class TreeSitterTSAnalyzer(TreeSitterJSAnalyzer):
     """TypeScript analyzer using tree-sitter."""
-    
+
     def __init__(self, file_path: str, content: str, limits: Optional[AnalysisLimits] = None):
         self.file_path = Path(file_path)
         self.content = content
         self.functions: List[Function] = []
         self.call_relationships: List[CallRelationship] = []
         self.limits = limits or create_javascript_limits()
-        
+
         # Initialize tree-sitter for TypeScript
         if TREE_SITTER_LANGUAGES_AVAILABLE:
             self.ts_language = get_language("typescript")
@@ -506,7 +519,7 @@ class TreeSitterTSAnalyzer(TreeSitterJSAnalyzer):
         else:
             self.ts_language = tree_sitter.Language(tree_sitter_typescript.language_typescript())
             self.parser = tree_sitter.Parser(self.ts_language)
-        
+
         logger.info(f"TreeSitterTSAnalyzer initialized for {file_path} with limits: {self.limits}")
 
 
@@ -521,7 +534,9 @@ def analyze_javascript_file_treesitter(
             limits = create_javascript_limits()
         analyzer = TreeSitterJSAnalyzer(file_path, content, limits)
         analyzer.analyze()
-        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {limits.nodes_processed} nodes processed")
+        logger.info(
+            f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {limits.nodes_processed} nodes processed"
+        )
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
         logger.error(f"Error in tree-sitter JS analysis for {file_path}: {e}", exc_info=True)
@@ -538,7 +553,9 @@ def analyze_typescript_file_treesitter(
             limits = create_javascript_limits()  # TypeScript uses same limits as JavaScript
         analyzer = TreeSitterTSAnalyzer(file_path, content, limits)
         analyzer.analyze()
-        logger.info(f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {limits.nodes_processed} nodes processed")
+        logger.info(
+            f"Found {len(analyzer.functions)} functions, {len(analyzer.call_relationships)} calls, {limits.nodes_processed} nodes processed"
+        )
         return analyzer.functions, analyzer.call_relationships
     except Exception as e:
         logger.error(f"Error in tree-sitter TS analysis for {file_path}: {e}", exc_info=True)
