@@ -14,7 +14,6 @@ from gitprobe.utils.patterns import CODE_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
-
 class CallGraphAnalyzer:
     """
     Multi-language call graph analyzer.
