@@ -9,15 +9,9 @@ import logging
 from typing import List, Set, Optional
 from pathlib import Path
 
-try:
-    from tree_sitter_languages import get_language, get_parser
-
-    TREE_SITTER_LANGUAGES_AVAILABLE = True
-except ImportError:
-    TREE_SITTER_LANGUAGES_AVAILABLE = False
-    import tree_sitter
-    import tree_sitter_javascript
-    import tree_sitter_typescript
+from tree_sitter import Parser, Language
+import tree_sitter_javascript
+import tree_sitter_typescript
 
 from gitprobe.models.core import Function, CallRelationship
 from gitprobe.core.analysis_limits import AnalysisLimits, create_javascript_limits
@@ -36,12 +30,24 @@ class TreeSitterJSAnalyzer:
         self.limits = limits or create_javascript_limits()
 
         # Initialize tree-sitter
-        if TREE_SITTER_LANGUAGES_AVAILABLE:
-            self.js_language = get_language("javascript")
-            self.parser = get_parser("javascript")
-        else:
-            self.js_language = tree_sitter.Language(tree_sitter_javascript.language())
-            self.parser = tree_sitter.Parser(self.js_language)
+        try:
+            language_capsule = tree_sitter_javascript.language()
+            self.js_language = Language(language_capsule)
+            self.parser = Parser(self.js_language)
+            logger.debug(f"JavaScript parser initialized with language object: {type(self.js_language)}")
+            
+            # Test parse with simple code to verify setup
+            test_code = "function test() { console.log('test'); }"
+            test_tree = self.parser.parse(bytes(test_code, "utf8"))
+            if test_tree is None or test_tree.root_node is None:
+                raise RuntimeError("Parser setup test failed for JavaScript")
+            logger.debug(f"JavaScript parser test successful - root node type: {test_tree.root_node.type}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize JavaScript parser: {e}")
+            # Fallback - create a dummy parser that will skip analysis
+            self.parser = None
+            self.js_language = None
 
         logger.info(f"TreeSitterJSAnalyzer initialized for {file_path} with limits: {self.limits}")
 
@@ -49,6 +55,10 @@ class TreeSitterJSAnalyzer:
         """Analyze the JavaScript content and extract functions and call relationships."""
         if not self.limits.start_new_file():
             logger.info(f"Skipping {self.file_path} - global limits reached")
+            return
+            
+        if self.parser is None:
+            logger.warning(f"Skipping {self.file_path} - parser initialization failed")
             return
 
         try:
@@ -513,12 +523,24 @@ class TreeSitterTSAnalyzer(TreeSitterJSAnalyzer):
         self.limits = limits or create_javascript_limits()
 
         # Initialize tree-sitter for TypeScript
-        if TREE_SITTER_LANGUAGES_AVAILABLE:
-            self.ts_language = get_language("typescript")
-            self.parser = get_parser("typescript")
-        else:
-            self.ts_language = tree_sitter.Language(tree_sitter_typescript.language_typescript())
-            self.parser = tree_sitter.Parser(self.ts_language)
+        try:
+            language_capsule = tree_sitter_typescript.language_typescript()
+            self.ts_language = Language(language_capsule)
+            self.parser = Parser(self.ts_language)
+            logger.debug(f"TypeScript parser initialized with language object: {type(self.ts_language)}")
+            
+            # Test parse with simple code to verify setup
+            test_code = "function test(): void { console.log('test'); }"
+            test_tree = self.parser.parse(bytes(test_code, "utf8"))
+            if test_tree is None or test_tree.root_node is None:
+                raise RuntimeError("Parser setup test failed for TypeScript")
+            logger.debug(f"TypeScript parser test successful - root node type: {test_tree.root_node.type}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize TypeScript parser: {e}")
+            # Fallback - create a dummy parser that will skip analysis
+            self.parser = None
+            self.ts_language = None
 
         logger.info(f"TreeSitterTSAnalyzer initialized for {file_path} with limits: {self.limits}")
 

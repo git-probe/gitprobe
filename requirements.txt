@@ -5,14 +5,11 @@ pydantic>=2.0.0
 fastapi>=0.100.0
 uvicorn>=0.23.0
 python-multipart
-tree-sitter>=0.20.0,<0.21.0
-# Fallback individual packages (if tree-sitter-languages fails)
-tree-sitter-c>=0.20.6
-tree-sitter-cpp>=0.20.0
-tree-sitter-go
-tree-sitter-javascript
-tree-sitter-typescript
+tree-sitter==0.23.2
+# Tree-sitter language packages (compatible versions)
+tree-sitter-c==0.21.4
+tree-sitter-cpp==0.23.4
+tree-sitter-go==0.21.1
+tree-sitter-javascript==0.21.4
+tree-sitter-typescript==0.21.2
 tree-sitter-rust==0.21.2
-# C/C++ parsing alternatives (deprecated)
-# pycparser>=2.22
-# clang>=20.0.0

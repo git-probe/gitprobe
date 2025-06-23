@@ -10,15 +10,9 @@ import logging
 from typing import List, Tuple, Dict, Any, Optional, Set
 from pathlib import Path
 
-try:
-    from tree_sitter_languages import get_language, get_parser
-
-    TREE_SITTER_LANGUAGES_AVAILABLE = True
-except ImportError:
-    TREE_SITTER_LANGUAGES_AVAILABLE = False
-    import tree_sitter
-    import tree_sitter_c
-    import tree_sitter_cpp
+from tree_sitter import Parser, Language
+import tree_sitter_c
+import tree_sitter_cpp
 
 from gitprobe.models.core import Function, CallRelationship
 from gitprobe.core.analysis_limits import AnalysisLimits, create_c_cpp_limits
@@ -54,20 +48,30 @@ class TreeSitterCAnalyzer:
         )
 
         # Initialize tree-sitter
-        if TREE_SITTER_LANGUAGES_AVAILABLE:
+        try:
             if is_cpp:
-                self.language_obj = get_language("cpp")
-                self.parser = get_parser("cpp")
+                language_capsule = tree_sitter_cpp.language()
+                self.language_obj = Language(language_capsule)
+                self.parser = Parser(self.language_obj)
+                logger.debug(f"C++ parser initialized with language object: {type(self.language_obj)}")
             else:
-                self.language_obj = get_language("c")
-                self.parser = get_parser("c")
-        else:
-            if is_cpp:
-                self.language_obj = tree_sitter.Language(tree_sitter_cpp.language())
-                self.parser = tree_sitter.Parser(self.language_obj)
-            else:
-                self.language_obj = tree_sitter.Language(tree_sitter_c.language())
-                self.parser = tree_sitter.Parser(self.language_obj)
+                language_capsule = tree_sitter_c.language()
+                self.language_obj = Language(language_capsule)
+                self.parser = Parser(self.language_obj)
+                logger.debug(f"C parser initialized with language object: {type(self.language_obj)}")
+                
+            # Test parse with simple code to verify setup
+            test_code = "int main() { return 0; }" if not is_cpp else "int main() { return 0; }"
+            test_tree = self.parser.parse(bytes(test_code, "utf8"))
+            if test_tree is None or test_tree.root_node is None:
+                raise RuntimeError(f"Parser setup test failed for {self.language.upper()}")
+            logger.debug(f"Parser test successful - root node type: {test_tree.root_node.type}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize {self.language.upper()} parser: {e}")
+            # Fallback - create a dummy parser that will skip analysis
+            self.parser = None
+            self.language_obj = None
 
         logger.info(
             f"TreeSitterCAnalyzer initialized for {file_path} ({self.language.upper()}) with limits: {self.limits}"
@@ -78,13 +82,31 @@ class TreeSitterCAnalyzer:
         if not self.limits.start_new_file():
             logger.info(f"Skipping {self.file_path} - global limits reached")
             return
+            
+        if self.parser is None:
+            logger.warning(f"Skipping {self.file_path} - parser initialization failed")
+            return
 
         try:
             # Parse the code
+            logger.debug(f"Attempting to parse {len(self.content)} bytes of {self.language.upper()} code")
+            logger.debug(f"Parser language object: {self.language_obj}")
+            
             tree = self.parser.parse(bytes(self.content, "utf8"))
+            
+            if tree is None:
+                raise ValueError("Parser returned None tree")
+            
             root_node = tree.root_node
-
+            if root_node is None:
+                raise ValueError("Tree has no root node")
+            
             logger.info(f"Parsed AST with root node type: {root_node.type}")
+            
+            # Check for parse errors
+            if root_node.has_error:
+                logger.warning(f"Parse tree contains errors for {self.file_path}")
+                # Continue anyway, as partial parsing might still be useful
 
             # Extract functions and methods
             self._extract_functions(root_node)

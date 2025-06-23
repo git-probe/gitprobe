@@ -6,14 +6,8 @@ import logging
 from typing import List, Set, Optional
 from pathlib import Path
 
-try:
-    from tree_sitter_languages import get_language, get_parser
-
-    TREE_SITTER_LANGUAGES_AVAILABLE = True
-except ImportError:
-    TREE_SITTER_LANGUAGES_AVAILABLE = False
-    import tree_sitter
-    import tree_sitter_go
+from tree_sitter import Parser, Language
+import tree_sitter_go
 
 from gitprobe.models.core import Function, CallRelationship
 from gitprobe.core.analysis_limits import AnalysisLimits, create_go_limits
@@ -32,13 +26,24 @@ class TreeSitterGoAnalyzer:
         self.limits = limits or create_go_limits()
 
         # Initialize tree-sitter
-        if TREE_SITTER_LANGUAGES_AVAILABLE:
-            self.go_language = get_language("go")
-            self.parser = get_parser("go")
-        else:
-            self.go_language = tree_sitter.Language(tree_sitter_go.language(), "go")
-            self.parser = tree_sitter.Parser()
-            self.parser.set_language(self.go_language)
+        try:
+            language_capsule = tree_sitter_go.language()
+            self.go_language = Language(language_capsule)
+            self.parser = Parser(self.go_language)
+            logger.debug(f"Go parser initialized with language object: {type(self.go_language)}")
+            
+            # Test parse with simple code to verify setup
+            test_code = "package main\nfunc main() { println(\"test\") }"
+            test_tree = self.parser.parse(bytes(test_code, "utf8"))
+            if test_tree is None or test_tree.root_node is None:
+                raise RuntimeError("Parser setup test failed for Go")
+            logger.debug(f"Go parser test successful - root node type: {test_tree.root_node.type}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize Go parser: {e}")
+            # Fallback - create a dummy parser that will skip analysis
+            self.parser = None
+            self.go_language = None
 
         logger.info(f"TreeSitterGoAnalyzer initialized for {file_path} with limits: {self.limits}")
 
@@ -46,6 +51,10 @@ class TreeSitterGoAnalyzer:
         """Analyze the Go content and extract functions and call relationships."""
         if not self.limits.start_new_file():
             logger.info(f"Skipping {self.file_path} - global limits reached")
+            return
+            
+        if self.parser is None:
+            logger.warning(f"Skipping {self.file_path} - parser initialization failed")
             return
 
         try:

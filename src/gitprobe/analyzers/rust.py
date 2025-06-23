@@ -6,14 +6,8 @@ import logging
 from typing import List, Set, Optional
 from pathlib import Path
 
-try:
-    from tree_sitter_languages import get_language, get_parser
-
-    TREE_SITTER_LANGUAGES_AVAILABLE = True
-except ImportError:
-    TREE_SITTER_LANGUAGES_AVAILABLE = False
-    import tree_sitter
-    import tree_sitter_rust
+from tree_sitter import Parser, Language
+import tree_sitter_rust
 
 from gitprobe.models.core import Function, CallRelationship
 from gitprobe.core.analysis_limits import AnalysisLimits, create_rust_limits
@@ -59,12 +53,24 @@ class TreeSitterRustAnalyzer:
         self.limits = limits or create_rust_limits()
 
         # Initialize tree-sitter
-        if TREE_SITTER_LANGUAGES_AVAILABLE:
-            self.rust_language = get_language("rust")
-            self.parser = get_parser("rust")
-        else:
-            self.rust_language = tree_sitter.Language(tree_sitter_rust.language())
-            self.parser = tree_sitter.Parser(self.rust_language)
+        try:
+            language_capsule = tree_sitter_rust.language()
+            self.rust_language = Language(language_capsule)
+            self.parser = Parser(self.rust_language)
+            logger.debug(f"Rust parser initialized with language object: {type(self.rust_language)}")
+            
+            # Test parse with simple code to verify setup
+            test_code = "fn main() { println!(\"test\"); }"
+            test_tree = self.parser.parse(bytes(test_code, "utf8"))
+            if test_tree is None or test_tree.root_node is None:
+                raise RuntimeError("Parser setup test failed for Rust")
+            logger.debug(f"Rust parser test successful - root node type: {test_tree.root_node.type}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize Rust parser: {e}")
+            # Fallback - create a dummy parser that will skip analysis
+            self.parser = None
+            self.rust_language = None
 
         logger.info(
             f"TreeSitterRustAnalyzer initialized for {file_path} with limits: {self.limits}"
@@ -74,6 +80,10 @@ class TreeSitterRustAnalyzer:
         """Analyze the Rust content and extract functions and call relationships."""
         if not self.limits.start_new_file():
             logger.info(f"Skipping {self.file_path} - global limits reached")
+            return
+            
+        if self.parser is None:
+            logger.warning(f"Skipping {self.file_path} - parser initialization failed")
             return
 
         try:
