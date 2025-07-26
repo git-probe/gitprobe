@@ -9,12 +9,13 @@ AST parsing for call graph generation.
 import logging
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-
+from gitprobe.utils.security import safe_open_text, assert_safe_path
 from gitprobe.analysis.repo_analyzer import RepoAnalyzer
 from gitprobe.analysis.call_graph_analyzer import CallGraphAnalyzer
 from gitprobe.analysis.cloning import clone_repository, cleanup_repository, parse_github_url
 from gitprobe.models.analysis import AnalysisResult
 from gitprobe.models.core import Repository
+
 
 logger = logging.getLogger(__name__)
 
@@ -192,15 +193,29 @@ class AnalysisService:
 
     def _read_readme_file(self, repo_dir: str) -> Optional[str]:
         """Find and read the README file from the repository root."""
+        # possible_readme_names = ["README.md", "README", "readme.md", "README.txt"]
+        # for name in possible_readme_names:
+        #     readme_path = Path(repo_dir) / name
+        #     if readme_path.exists():
+        #         try:
+        #             logger.info(f"Found README file at {readme_path}")
+        #             return readme_path.read_text(encoding="utf-8")
+        #         except Exception as e:
+        #             logger.warning(f"Could not read README file at {readme_path}: {e}")
+        #             return None
+        # logger.info("No README file found in repository root.")
+        # return None
+        base = Path(repo_dir)
         possible_readme_names = ["README.md", "README", "readme.md", "README.txt"]
         for name in possible_readme_names:
-            readme_path = Path(repo_dir) / name
-            if readme_path.exists():
+            p = base / name
+            if p.exists():
                 try:
-                    logger.info(f"Found README file at {readme_path}")
-                    return readme_path.read_text(encoding="utf-8")
+                    assert_safe_path(base, p)
+                    logger.info(f"Found README file at {p}")
+                    return safe_open_text(base, p, encoding="utf-8")
                 except Exception as e:
-                    logger.warning(f"Could not read README file at {readme_path}: {e}")
+                    logger.warning(f"Skipping unsafe/ unreadable README at {p}: {e}")
                     return None
         logger.info("No README file found in repository root.")
         return None

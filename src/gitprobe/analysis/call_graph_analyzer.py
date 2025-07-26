@@ -11,6 +11,7 @@ from typing import Dict, List
 import logging
 from gitprobe.models.core import Function, CallRelationship
 from gitprobe.utils.patterns import CODE_EXTENSIONS
+from gitprobe.utils.security import safe_open_text
 
 logger = logging.getLogger(__name__)
 
@@ -176,13 +177,17 @@ class CallGraphAnalyzer:
             repo_dir: Repository directory path
             file_info: File information dictionary
         """
-        file_path = Path(repo_dir) / file_info["path"]
+        # file_path = Path(repo_dir) / file_info["path"]
 
+        # logger.debug(f"Reading content of {file_path}")
+        # try:
+        #     with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+        #         content = f.read()
+        base = Path(repo_dir)
+        file_path = base / file_info["path"]
         logger.debug(f"Reading content of {file_path}")
         try:
-            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-
+            content = safe_open_text(base, file_path)
             language = file_info["language"]
             logger.info(f"Analyzing {language} file: {file_path}")
             if language == "python":
